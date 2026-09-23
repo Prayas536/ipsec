@@ -195,7 +195,7 @@ export default function App() {
                   <input
                     id="dropzone-file"
                     type="file"
-                    accept=".pcap,.pcapng,.cap,.json"
+                    accept=".pcap,.pcapng,.cap"
                     onChange={handleFileUpload}
                     className="hidden"
                   />

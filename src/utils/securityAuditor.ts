@@ -5,7 +5,19 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   let totalScore = 100;
 
   // 1. IKE Version Audit
-  if (sa.ikeVersion === 'IKEv1') {
+  if (sa.ikeVersion === 'Not observed in capture') {
+    findings.push({
+      id: 'F-IKE-UNKNOWN',
+      parameter: 'Key Exchange Protocol',
+      detectedValue: 'Not observed in capture',
+      recommendedValue: 'IKEv2',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Negotiation Not Captured',
+      description: 'The capture does not contain a decodable IKE version. No protocol security conclusion is made.',
+      remediation: 'Capture the IKE_SA_INIT exchange for exact protocol evidence.',
+    });
+  } else if (sa.ikeVersion === 'IKEv1') {
     const penalty = 15;
     totalScore -= penalty;
     findings.push({
@@ -35,7 +47,19 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
 
   // 2. Encryption Algorithm Audit
   const encUpper = sa.encryptionAlgorithm.toUpperCase();
-  if (encUpper.includes('3DES') || encUpper.includes('DES')) {
+  if (encUpper.includes('NOT OBSERVED')) {
+    findings.push({
+      id: 'F-ENC-UNKNOWN',
+      parameter: 'Symmetric Encryption Cipher',
+      detectedValue: sa.encryptionAlgorithm,
+      recommendedValue: 'Not assessed',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Encryption Transform Not Captured',
+      description: 'No decodable encryption transform was observed in the capture.',
+      remediation: 'Capture an IKE_SA_INIT exchange containing the SA payload.',
+    });
+  } else if (encUpper.includes('3DES') || encUpper.includes('DES')) {
     const penalty = 35;
     totalScore -= penalty;
     findings.push({
@@ -79,7 +103,19 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   }
 
   // 3. Diffie-Hellman Group Strength
-  if (sa.dhGroupNumber < 14 || sa.dhBits < 2048) {
+  if (sa.dhGroupNumber === 0) {
+    findings.push({
+      id: 'F-DH-UNKNOWN',
+      parameter: 'Diffie-Hellman Key Exchange',
+      detectedValue: sa.dhGroup,
+      recommendedValue: 'Not assessed',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'DH Transform Not Captured',
+      description: 'No decodable Diffie-Hellman transform was observed in the capture.',
+      remediation: 'Capture an IKE_SA_INIT exchange containing the SA payload.',
+    });
+  } else if (sa.dhGroupNumber < 14 || sa.dhBits < 2048) {
     const penalty = 30;
     totalScore -= penalty;
     findings.push({
@@ -109,7 +145,19 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   }
 
   // 4. Perfect Forward Secrecy (PFS)
-  if (!sa.pfsEnabled) {
+  if (sa.pfsEnabled === null) {
+    findings.push({
+      id: 'F-PFS-UNKNOWN',
+      parameter: 'Perfect Forward Secrecy (PFS)',
+      detectedValue: 'Not observed in capture',
+      recommendedValue: 'Not assessed',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Child SA PFS Not Captured',
+      description: 'PFS cannot be determined from an IKE_SA_INIT exchange alone.',
+      remediation: 'Capture CREATE_CHILD_SA exchanges or provide an explicit Child SA configuration.',
+    });
+  } else if (!sa.pfsEnabled) {
     const penalty = 20;
     totalScore -= penalty;
     findings.push({
@@ -157,7 +205,7 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   }
 
   // 6. Key Lifetime
-  if (sa.keyLifetimeSeconds > 28800) { // > 8 hours
+  if (sa.keyLifetimeSeconds !== null && sa.keyLifetimeSeconds > 28800) { // > 8 hours
     const penalty = 10;
     totalScore -= penalty;
     findings.push({
@@ -174,7 +222,19 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   }
 
   // 7. Replay Protection
-  if (!sa.replayProtection) {
+  if (sa.replayProtection === null) {
+    findings.push({
+      id: 'F-REPLAY-UNKNOWN',
+      parameter: 'Anti-Replay Window Protection',
+      detectedValue: 'Not observed in capture',
+      recommendedValue: 'Not assessed',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Replay Configuration Not Captured',
+      description: 'ESP sequence numbers do not reveal the configured replay window.',
+      remediation: 'Provide Child SA configuration or negotiated ESN evidence.',
+    });
+  } else if (!sa.replayProtection) {
     const penalty = 15;
     totalScore -= penalty;
     findings.push({

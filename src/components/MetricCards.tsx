@@ -86,7 +86,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
         <div className="mt-2 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2 flex items-center justify-between">
           <span>Key Exchange: <strong className="text-slate-200">{sa.ikeVersion}</strong></span>
-          <span>Lifetime: <strong className="text-slate-200">{sa.keyLifetimeSeconds / 3600}h</strong></span>
+          <span>Lifetime: <strong className="text-slate-200">{sa.keyLifetimeSeconds === null ? 'Not observed' : `${sa.keyLifetimeSeconds / 3600}h`}</strong></span>
         </div>
       </div>
 
@@ -142,7 +142,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
         <div className="mt-2.5 flex items-center justify-between border-t border-slate-800/80 pt-2 text-[11px]">
           <span className="text-slate-400">PFS Status:</span>
-          {sa.pfsEnabled ? (
+          {sa.pfsEnabled === null ? (
+            <span className="font-semibold text-slate-400">Not determined</span>
+          ) : sa.pfsEnabled ? (
             <span className="inline-flex items-center gap-1 font-semibold text-emerald-400">
               <Lock className="w-3 h-3" /> Enabled
             </span>

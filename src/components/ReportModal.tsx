@@ -69,9 +69,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 - **Symmetric Cipher:** ${scenario.sa.encryptionAlgorithm} (${scenario.sa.encryptionKeyBits}-bit)
 - **Integrity / Hash:** ${scenario.sa.authIntegrityAlgorithm}
 - **Diffie-Hellman Group:** ${scenario.sa.dhGroup} (${scenario.sa.dhBits}-bit)
-- **Perfect Forward Secrecy (PFS):** ${scenario.sa.pfsEnabled ? 'ENABLED' : 'DISABLED (CRITICAL VULNERABILITY)'}
-- **Key Lifetime:** ${scenario.sa.keyLifetimeSeconds / 3600} hours
-- **Replay Protection:** ${scenario.sa.replayProtection ? 'ENABLED' : 'DISABLED'}
+- **Perfect Forward Secrecy (PFS):** ${scenario.sa.pfsEnabled === null ? 'NOT OBSERVED' : scenario.sa.pfsEnabled ? 'ENABLED' : 'DISABLED'}
+- **Key Lifetime:** ${scenario.sa.keyLifetimeSeconds === null ? 'NOT OBSERVED' : `${scenario.sa.keyLifetimeSeconds / 3600} hours`}
+- **Replay Protection:** ${scenario.sa.replayProtection === null ? 'NOT OBSERVED' : scenario.sa.replayProtection ? 'ENABLED' : 'DISABLED'}
 
 ---
 
@@ -234,8 +234,8 @@ ${scorecard.findings
                 <div>Target Gateway: {scenario.packets[0]?.destIp || '10.0.0.1'}</div>
                 <div>Initiator SPI: {scenario.sa.initiatorSpi}</div>
                 <div>Responder SPI: {scenario.sa.responderSpi}</div>
-                <div>Key Lifetime Window: {scenario.sa.keyLifetimeSeconds}s</div>
-                <div>Replay Protection: {scenario.sa.replayProtection ? 'ENABLED (Window 64)' : 'DISABLED (FAIL)'}</div>
+                <div>Key Lifetime Window: {scenario.sa.keyLifetimeSeconds === null ? 'Not observed' : `${scenario.sa.keyLifetimeSeconds}s`}</div>
+                <div>Replay Protection: {scenario.sa.replayProtection === null ? 'Not observed' : scenario.sa.replayProtection ? `ENABLED${scenario.sa.replayWindowSize ? ` (Window ${scenario.sa.replayWindowSize})` : ''}` : 'DISABLED'}</div>
               </div>
 
               {/* Technical Specifications */}
@@ -258,8 +258,8 @@ ${scorecard.findings
                   </div>
                   <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700">
                     <div className="text-[10px] text-slate-400">PFS Status</div>
-                    <div className={`font-bold mt-1 ${scenario.sa.pfsEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {scenario.sa.pfsEnabled ? 'ENABLED' : 'DISABLED'}
+                    <div className={`font-bold mt-1 ${scenario.sa.pfsEnabled === null ? 'text-slate-400' : scenario.sa.pfsEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {scenario.sa.pfsEnabled === null ? 'NOT OBSERVED' : scenario.sa.pfsEnabled ? 'ENABLED' : 'DISABLED'}
                     </div>
                   </div>
                 </div>

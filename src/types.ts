@@ -1,6 +1,35 @@
-export type IkeVersion = 'IKEv1' | 'IKEv2';
-export type OperationalMode = 'Tunnel Mode' | 'Transport Mode';
-export type IpVersion = 'IPv4' | 'IPv6';
+export type IkeVersion = 'IKEv1' | 'IKEv2' | 'Not observed in capture';
+export type OperationalMode = 'Tunnel Mode' | 'Transport Mode' | 'Not determined from capture';
+export type IpVersion = 'IPv4' | 'IPv6' | 'Not observed in capture';
+
+export type EvidenceConfidence = 'exact' | 'heuristic' | 'unavailable';
+
+export interface EvidenceRecord {
+  value: string | number | boolean | null;
+  confidence: EvidenceConfidence;
+  source: string;
+  packetNumber?: number;
+  rawBytes?: string;
+  fieldPath: string;
+}
+
+export interface ParsedTransform {
+  type: number;
+  id: number;
+  name: string;
+  attributes: Record<number, number>;
+  attributeRawBytes?: Record<number, string>;
+  rawBytes: string;
+  packetNumber: number;
+}
+
+export interface ParsedProposal {
+  number: number;
+  protocolId: number;
+  spi: string;
+  transforms: ParsedTransform[];
+  packetNumber: number;
+}
 
 export type TrafficCategory = 
   | 'VoIP / Audio Call'
@@ -15,12 +44,16 @@ export interface PacketInfo {
   timestamp: number; // relative ms
   sourceIp: string;
   destIp: string;
-  protocol: 'IKE' | 'ESP' | 'AH' | 'ICMP';
+  protocol: 'IKE' | 'ESP' | 'AH' | 'ICMP' | 'UDP' | 'OTHER';
   length: number;
   info: string;
   spi?: string;
   seq?: number;
   rawPreview?: string;
+  sourcePort?: number;
+  destPort?: number;
+  ipVersion?: IpVersion;
+  debug?: string;
 }
 
 export interface IkeSecurityAssociation {
@@ -33,12 +66,14 @@ export interface IkeSecurityAssociation {
   dhGroup: string;
   dhGroupNumber: number;
   dhBits: number;
-  pfsEnabled: boolean;
-  keyLifetimeSeconds: number;
-  replayProtection: boolean;
-  replayWindowSize?: number;
+  pfsEnabled: boolean | null;
+  keyLifetimeSeconds: number | null;
+  replayProtection: boolean | null;
+  replayWindowSize?: number | null;
   initiatorSpi: string;
   responderSpi: string;
+  proposals?: ParsedProposal[];
+  evidence?: EvidenceRecord[];
 }
 
 export interface EspTrafficFeatures {
