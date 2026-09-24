@@ -5,6 +5,7 @@ import {
   ParsedProposal,
   ParsedTransform,
   PacketInfo,
+  CaptureObservations,
   VpnCaptureScenario,
 } from '../types';
 
@@ -27,6 +28,10 @@ const PCAP_MAGIC_BE_USEC = 0xa1b2c3d4;
 const PCAP_MAGIC_LE_USEC = 0xd4c3b2a1;
 const PCAP_MAGIC_BE_NSEC = 0xa1b23c4d;
 const PCAP_MAGIC_LE_NSEC = 0x4d3cb2a1;
+const PCAPNG_SECTION_HEADER = 0x0a0d0d0a;
+const PCAPNG_INTERFACE_DESCRIPTION = 0x00000001;
+const PCAPNG_SIMPLE_PACKET = 0x00000003;
+const PCAPNG_ENHANCED_PACKET = 0x00000006;
 
 const LINKTYPE_ETHERNET = 1;
 const LINKTYPE_RAW = 101;
@@ -194,6 +199,86 @@ function payloadName(type: number): string {
   return names[type] || `Payload-${type}`;
 }
 
+function ikeV1PayloadName(type: number): string {
+  const names: Record<number, string> = {
+    1: 'SA',
+    2: 'Proposal',
+    4: 'KE',
+    5: 'ID',
+    6: 'CERT',
+    7: 'CERTREQ',
+    8: 'HASH',
+    9: 'SIG',
+    10: 'NONCE',
+    11: 'NOTIFY',
+    12: 'DELETE',
+    13: 'VENDOR',
+  };
+  return names[type] || `IKEv1-Payload-${type}`;
+}
+
+function notifyName(type: number): string {
+  const names: Record<number, string> = {
+    16384: 'INITIAL_CONTACT',
+    16385: 'SET_WINDOW_SIZE',
+    16386: 'ADDITIONAL_TS_POSSIBLE',
+    16388: 'NAT_DETECTION_SOURCE_IP',
+    16389: 'NAT_DETECTION_DESTINATION_IP',
+    16390: 'COOKIE',
+    16391: 'USE_TRANSPORT_MODE',
+    16406: 'MOBIKE_SUPPORTED',
+    16430: 'FRAGMENTATION_SUPPORTED',
+    16431: 'SIGNATURE_HASH_ALGORITHMS',
+  };
+  return names[type] || `Notify-${type}`;
+}
+
+function parseTrafficSelectors(
+  body: Uint8Array,
+  label: string
+): string[] {
+  if (body.length < 4) return [];
+  const count = body[0];
+  const selectors: string[] = [];
+  let offset = 4;
+
+  for (let index = 0; index < count; index++) {
+    if (offset + 8 > body.length) break;
+    const selectorType = body[offset];
+    const protocol = body[offset + 1];
+    const length = readU16(body, offset + 2);
+    const startPort = readU16(body, offset + 4);
+    const endPort = readU16(body, offset + 6);
+    const addressSize = selectorType === 7 ? 4 : selectorType === 8 ? 16 : 0;
+
+    if (length < 8 || offset + length > body.length) break;
+    if (addressSize === 0 || length < 8 + addressSize * 2) {
+      selectors.push(`${label}[${index}] type=${selectorType} protocol=${protocol} length=${length}`);
+      offset += length;
+      continue;
+    }
+
+    const start = body.slice(offset + 8, offset + 8 + addressSize);
+    const end = body.slice(offset + 8 + addressSize, offset + 8 + addressSize * 2);
+    const startText = addressSize === 4
+      ? Array.from(start).join('.')
+      : Array.from({ length: 8 }, (_, group) =>
+          ((start[group * 2] << 8) | start[group * 2 + 1]).toString(16)
+        ).join(':');
+    const endText = addressSize === 4
+      ? Array.from(end).join('.')
+      : Array.from({ length: 8 }, (_, group) =>
+          ((end[group * 2] << 8) | end[group * 2 + 1]).toString(16)
+        ).join(':');
+    selectors.push(
+      `${label}[${index}] ${startText}-${endText} proto=${protocol === 0 ? 'ANY' : protocol} ports=${startPort}-${endPort}`
+    );
+    offset += length;
+  }
+
+  return selectors;
+}
+
 function exchangeName(exchangeType: number): string {
   const names: Record<number, string> = {
     34: 'IKE_SA_INIT',
@@ -203,6 +288,16 @@ function exchangeName(exchangeType: number): string {
   };
 
   return names[exchangeType] || `Exchange ${exchangeType}`;
+}
+
+function ikeV1ExchangeName(exchangeType: number): string {
+  const names: Record<number, string> = {
+    2: 'Main Mode',
+    4: 'Aggressive Mode',
+    5: 'Informational',
+    32: 'Quick Mode',
+  };
+  return names[exchangeType] || `IKEv1 Exchange ${exchangeType}`;
 }
 
 /* =========================================================
@@ -358,6 +453,11 @@ interface IkeParseResult {
   firstPayload?: number;
   proposals: IkeProposal[];
   payloads: string[];
+  messageId?: number;
+  notifications?: string[];
+  vendorIds?: string[];
+  trafficSelectors?: string[];
+  flags?: string[];
 }
 
 /* =========================================================
@@ -442,7 +542,8 @@ function parseTransform(
     };
   }
 
-  const transformType = body[offset + 5];
+  // IKEv2 Transform: type is byte 4; byte 5 is reserved.
+  const transformType = body[offset + 4];
   const transformId = readU16(body, offset + 6);
 
   const parsedAttributes = parseTransformAttributes(
@@ -607,6 +708,10 @@ function parseIkeMessage(
     valid: false,
     proposals: [],
     payloads: [],
+    notifications: [],
+    vendorIds: [],
+    trafficSelectors: [],
+    flags: [],
   };
 
   if (ikeOffset + 28 > bytes.length) {
@@ -627,6 +732,12 @@ function parseIkeMessage(
   result.responderSpi = responderSpi;
   result.firstPayload = firstPayload;
   result.exchangeType = exchangeType;
+  result.messageId = readU32(bytes, ikeOffset + 20);
+  result.flags = [
+    ...(bytes[ikeOffset + 19] & 0x20 ? ['Response'] : []),
+    ...(bytes[ikeOffset + 19] & 0x10 ? ['Version'] : []),
+    ...(bytes[ikeOffset + 19] & 0x08 ? ['Initiator'] : []),
+  ];
 
   if (majorVersion === 1) {
     result.ikeVersion = 'IKEv1';
@@ -689,11 +800,30 @@ function parseIkeMessage(
       break;
     }
 
-    result.payloads.push(payloadName(payloadType));
+    result.payloads.push(
+      result.ikeVersion === 'IKEv1'
+        ? ikeV1PayloadName(payloadType)
+        : payloadName(payloadType)
+    );
 
     const payloadBodyStart = payloadOffset + 4;
     const payloadBodyEnd =
       payloadOffset + payloadLength;
+
+    if (
+      ((result.ikeVersion === 'IKEv2' && payloadType === IKE_PAYLOAD_NOTIFY) ||
+        (result.ikeVersion === 'IKEv1' && payloadType === 11)) &&
+      payloadLength >= 8
+    ) {
+      result.notifications?.push(notifyName(readU16(bytes, payloadBodyStart + 2)));
+    }
+
+    if (
+      (result.ikeVersion === 'IKEv2' && payloadType === IKE_PAYLOAD_VENDOR) ||
+      (result.ikeVersion === 'IKEv1' && payloadType === 13)
+    ) {
+      result.vendorIds?.push(hex(bytes.slice(payloadBodyStart, payloadBodyEnd)));
+    }
 
     /*
      * SA payload
@@ -703,7 +833,10 @@ function parseIkeMessage(
      *     Proposal 2
      *     ...
      */
-    if (payloadType === IKE_PAYLOAD_SA) {
+    if (
+      payloadType === IKE_PAYLOAD_SA &&
+      result.ikeVersion === 'IKEv2'
+    ) {
       const saBody = bytes.slice(
         payloadBodyStart,
         payloadBodyEnd
@@ -712,6 +845,15 @@ function parseIkeMessage(
       const proposals = parseSaPayload(saBody, packetNumber);
 
       result.proposals.push(...proposals);
+    }
+
+    if (payloadType === IKE_PAYLOAD_TSi || payloadType === IKE_PAYLOAD_TSr) {
+      result.trafficSelectors?.push(
+        ...parseTrafficSelectors(
+          bytes.slice(payloadBodyStart, payloadBodyEnd),
+          payloadName(payloadType)
+        )
+      );
     }
 
     /*
@@ -1130,6 +1272,223 @@ function isIkeUdpPort(port: number): boolean {
   return port === 500 || port === 4500;
 }
 
+interface PcapNgPacket {
+  timestampSeconds: number;
+  capturedLength: number;
+  originalLength: number;
+  bytes: Uint8Array;
+  linkType: number;
+}
+
+function readPcapNgOptions(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  littleEndian: boolean
+): number {
+  let offset = start;
+  let timestampResolution = 1e-6;
+
+  while (offset + 4 <= end) {
+    const optionType = readU16(bytes, offset, littleEndian);
+    const optionLength = readU16(bytes, offset + 2, littleEndian);
+    offset += 4;
+
+    if (optionType === 0) break;
+    if (offset + optionLength > end) break;
+
+    if (optionType === 9 && optionLength >= 1) {
+      const resolution = bytes[offset];
+      timestampResolution =
+        (resolution & 0x80) !== 0
+          ? Math.pow(2, -(resolution & 0x7f))
+          : Math.pow(10, -resolution);
+    }
+
+    offset += (optionLength + 3) & ~3;
+  }
+
+  return timestampResolution;
+}
+
+function toClassicPcap(
+  packets: PcapNgPacket[],
+  linkType: number
+): Uint8Array {
+  const header = new Uint8Array(24);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint32(0, PCAP_MAGIC_BE_USEC, false);
+  headerView.setUint16(4, 2, false);
+  headerView.setUint16(6, 4, false);
+  headerView.setUint32(16, 0xffff, false);
+  headerView.setUint32(20, linkType, false);
+
+  const output: Uint8Array[] = [header];
+  let size = header.length;
+
+  for (const packet of packets) {
+    const timestampSeconds = Math.max(0, packet.timestampSeconds);
+    const seconds = Math.floor(timestampSeconds);
+    const microseconds = Math.floor(
+      (timestampSeconds - seconds) * 1_000_000
+    );
+    const record = new Uint8Array(16);
+    const view = new DataView(record.buffer);
+    view.setUint32(0, seconds, false);
+    view.setUint32(4, microseconds, false);
+    view.setUint32(8, packet.capturedLength, false);
+    view.setUint32(12, packet.originalLength, false);
+    output.push(record, packet.bytes);
+    size += record.length + packet.bytes.length;
+  }
+
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const part of output) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
+
+function convertPcapNgToClassicPcap(bytes: Uint8Array): Uint8Array {
+  const packets: PcapNgPacket[] = [];
+  const interfaces: Array<{
+    linkType: number;
+    timestampResolution: number;
+  }> = [];
+  let offset = 0;
+  let littleEndian = false;
+  let activeSection = false;
+
+  while (offset + 12 <= bytes.length) {
+    const blockType = readU32(bytes, offset, littleEndian);
+
+    if (blockType === PCAPNG_SECTION_HEADER) {
+      if (offset + 12 > bytes.length) {
+        throw new Error('Truncated PCAPNG section header.');
+      }
+
+      const byteOrderMagic = readU32(bytes, offset + 8, false);
+      if (byteOrderMagic === 0x1a2b3c4d) {
+        littleEndian = false;
+      } else if (byteOrderMagic === 0x4d3c2b1a) {
+        littleEndian = true;
+      } else {
+        throw new Error('Invalid PCAPNG byte-order magic.');
+      }
+
+      const sectionLength = readU32(bytes, offset + 4, littleEndian);
+      if (
+        sectionLength < 28 ||
+        offset + sectionLength > bytes.length
+      ) {
+        throw new Error('Invalid or truncated PCAPNG section.');
+      }
+
+      interfaces.length = 0;
+      activeSection = true;
+      offset += sectionLength;
+      continue;
+    }
+
+    if (!activeSection || offset + 12 > bytes.length) {
+      throw new Error('PCAPNG packet appears before a section header.');
+    }
+
+    const blockLength = readU32(bytes, offset + 4, littleEndian);
+    if (
+      blockLength < 12 ||
+      (blockLength & 3) !== 0 ||
+      offset + blockLength > bytes.length
+    ) {
+      throw new Error('Invalid or truncated PCAPNG block.');
+    }
+
+    const trailingLength = readU32(
+      bytes,
+      offset + blockLength - 4,
+      littleEndian
+    );
+    if (trailingLength !== blockLength) {
+      throw new Error('PCAPNG block length trailer does not match.');
+    }
+
+    if (blockType === PCAPNG_INTERFACE_DESCRIPTION) {
+      if (blockLength < 20) {
+        throw new Error('Truncated PCAPNG interface description.');
+      }
+      const linkType = readU16(bytes, offset + 8, littleEndian);
+      const optionsStart = offset + 16;
+      const optionsEnd = offset + blockLength - 4;
+      interfaces.push({
+        linkType,
+        timestampResolution: readPcapNgOptions(
+          bytes,
+          optionsStart,
+          optionsEnd,
+          littleEndian
+        ),
+      });
+    } else if (blockType === PCAPNG_ENHANCED_PACKET) {
+      if (blockLength < 32) {
+        throw new Error('Truncated PCAPNG enhanced packet block.');
+      }
+      const interfaceId = readU32(bytes, offset + 8, littleEndian);
+      const networkInterface = interfaces[interfaceId];
+      if (!networkInterface) {
+        throw new Error(`PCAPNG packet references unknown interface ${interfaceId}.`);
+      }
+      const timestampHigh = readU32(bytes, offset + 12, littleEndian);
+      const timestampLow = readU32(bytes, offset + 16, littleEndian);
+      const capturedLength = readU32(bytes, offset + 20, littleEndian);
+      const originalLength = readU32(bytes, offset + 24, littleEndian);
+      const dataStart = offset + 28;
+      if (dataStart + capturedLength > offset + blockLength - 4) {
+        throw new Error('PCAPNG enhanced packet exceeds its block.');
+      }
+      const ticks = timestampHigh * 0x100000000 + timestampLow;
+      packets.push({
+        timestampSeconds: ticks * networkInterface.timestampResolution,
+        capturedLength,
+        originalLength,
+        bytes: bytes.slice(dataStart, dataStart + capturedLength),
+        linkType: networkInterface.linkType,
+      });
+    } else if (blockType === PCAPNG_SIMPLE_PACKET) {
+      if (blockLength < 16 || interfaces.length === 0) {
+        throw new Error('Invalid PCAPNG simple packet block.');
+      }
+      const networkInterface = interfaces[0];
+      const originalLength = readU32(bytes, offset + 8, littleEndian);
+      const capturedLength = blockLength - 16;
+      const dataStart = offset + 12;
+      packets.push({
+        timestampSeconds: packets.length,
+        capturedLength,
+        originalLength,
+        bytes: bytes.slice(dataStart, dataStart + capturedLength),
+        linkType: networkInterface.linkType,
+      });
+    }
+
+    offset += blockLength;
+  }
+
+  if (packets.length === 0) {
+    throw new Error('PCAPNG contains no packet blocks.');
+  }
+
+  const linkType = packets[0].linkType;
+  if (packets.some((packet) => packet.linkType !== linkType)) {
+    throw new Error(
+      'PCAPNG contains multiple link types. Use the Scapy analyzer for mixed-interface captures.'
+    );
+  }
+
+  return toClassicPcap(packets, linkType);
+}
+
 /* =========================================================
    Main parser
 ========================================================= */
@@ -1141,10 +1500,28 @@ export async function parseUploadedFile(
 
   const bytes = new Uint8Array(arrayBuffer);
 
-  if (bytes.length < 24) {
-    throw new Error(
-      'File is too small to be a valid classic PCAP.'
+  if (bytes.length < 12) {
+    throw new Error('File is too small to be a valid PCAP or PCAPNG.');
+  }
+
+  const firstWord = readU32(bytes, 0, false);
+  if (firstWord === PCAPNG_SECTION_HEADER) {
+    const converted = convertPcapNgToClassicPcap(bytes);
+    const normalizedFile = new File(
+      [converted.buffer as ArrayBuffer],
+      file.name.replace(/\.pcapng$/i, '.pcap'),
+      { type: 'application/vnd.tcpdump.pcap' }
     );
+    const parsed = await parseUploadedFile(normalizedFile);
+    return {
+      ...parsed,
+      scenarioName: file.name.replace(/\.[^/.]+$/, ''),
+      fileSizeBytes: file.size,
+    };
+  }
+
+  if (bytes.length < 24) {
+    throw new Error('File is too small to be a valid classic PCAP.');
   }
 
   /* =====================================================
@@ -1176,25 +1553,6 @@ export async function parseUploadedFile(
     littleEndian = true;
     nanosecondTimestamp = true;
   } else {
-    /*
-     * PCAPNG starts with:
-     *
-     * 0A 0D 0D 0A
-     *
-     * We explicitly report it rather than silently
-     * treating it as a normal PCAP.
-     */
-    if (
-      bytes[0] === 0x0a &&
-      bytes[1] === 0x0d &&
-      bytes[2] === 0x0d &&
-      bytes[3] === 0x0a
-    ) {
-      throw new Error(
-        'This file is PCAPNG. The current browser parser expects classic PCAP. Export it from Wireshark as "pcap" or add a PCAPNG parser/backend.'
-      );
-    }
-
     throw new Error(
       'Unsupported capture format: invalid PCAP magic number.'
     );
@@ -1329,6 +1687,29 @@ export async function parseUploadedFile(
   let sawCreateChildSa = false;
 
   let observedProposals: IkeProposal[] = [];
+  const observationIkeExchanges = new Set<string>();
+  const observationIkePayloads = new Set<string>();
+  const observationMessageIds = new Set<number>();
+  const observationIkeFlags = new Set<string>();
+  const observationIkeNotifications = new Set<string>();
+  const observationIkeVendorIds = new Set<string>();
+  const observationTrafficSelectors = new Set<string>();
+  const observationEspSpis = new Set<string>();
+  const observationAhSpis = new Set<string>();
+  const observationAhSequences: number[] = [];
+  const observationEspDirections = new Set<string>();
+  const observationEspSequences: number[] = [];
+  const observationEspSequenceSet = new Set<number>();
+  const observationEspDuplicates = new Set<number>();
+  let observationEspOutOfOrder = false;
+  const observationLinkTypes = new Set<string>();
+  let observationIkePackets = 0;
+  let observationEspPackets = 0;
+  let observationAhPackets = 0;
+  let observationUdpPackets = 0;
+  let observationTcpPackets = 0;
+  let observationIcmpPackets = 0;
+  let observationNatTraversal = false;
 
   /* =====================================================
      Packet loop
@@ -1402,6 +1783,16 @@ export async function parseUploadedFile(
     const packet = bytes.slice(
       packetStart,
       packetEnd
+    );
+
+    observationLinkTypes.add(
+      linkType === LINKTYPE_ETHERNET
+        ? 'Ethernet'
+        : linkType === LINKTYPE_RAW
+        ? 'Raw IP'
+        : linkType === LINKTYPE_LINUX_SLL
+        ? 'Linux SLL'
+        : 'Linux SLL2'
     );
 
     /* -----------------------------------------------
@@ -1496,6 +1887,8 @@ export async function parseUploadedFile(
 
     let spi: string | undefined;
     let seq: number | undefined;
+    let sourcePort: number | undefined;
+    let destPort: number | undefined;
 
     /* -----------------------------------------------
        UDP / IKE
@@ -1504,48 +1897,44 @@ export async function parseUploadedFile(
     if (
       ipProtocol === IPPROTO_UDP
     ) {
+      observationUdpPackets++;
       const udp = parseUdp(
         packet,
         transportOffset
       );
 
       if (udp) {
+        sourcePort = udp.srcPort;
+        destPort = udp.dstPort;
+        if (udp.srcPort === 4500 || udp.dstPort === 4500) {
+          observationNatTraversal = true;
+        }
         const isIke =
           isIkeUdpPort(udp.srcPort) ||
           isIkeUdpPort(udp.dstPort);
 
-        if (isIke) {
+        const isNatTraversal =
+          udp.srcPort === 4500 || udp.dstPort === 4500;
+        const hasNonEspMarker =
+          isNatTraversal && isZero4(packet, udp.payloadOffset);
+        const ikeOffset = hasNonEspMarker
+          ? udp.payloadOffset + 4
+          : udp.payloadOffset;
+        const ike = isIke
+          ? parseIkeMessage(packet, ikeOffset, packetIndex)
+          : { valid: false, proposals: [], payloads: [] };
+
+        if (ike.valid) {
           protocol = 'IKE';
-
-          let ikeOffset =
-            udp.payloadOffset;
-
-          /*
-           * UDP 4500:
-           *
-           * Non-ESP Marker:
-           * 00 00 00 00
-           *
-           * If present, it belongs before IKE.
-           */
-          if (
-            udp.srcPort === 4500 ||
-            udp.dstPort === 4500
-          ) {
-            if (
-              isZero4(
-                packet,
-                ikeOffset
-              )
-            ) {
-              ikeOffset += 4;
-            }
-          }
-
-          const ike =
-            parseIkeMessage(packet, ikeOffset, packetIndex);
-
-          if (ike.valid) {
+          observationIkePackets++;
+          observationNatTraversal = observationNatTraversal || isNatTraversal;
+            observationIkeExchanges.add(exchangeName(ike.exchangeType || 0));
+            ike.payloads.forEach((payload) => observationIkePayloads.add(payload));
+            ike.flags?.forEach((flag) => observationIkeFlags.add(flag));
+            ike.notifications?.forEach((notification) => observationIkeNotifications.add(notification));
+            ike.vendorIds?.forEach((vendorId) => observationIkeVendorIds.add(vendorId));
+            ike.trafficSelectors?.forEach((selector) => observationTrafficSelectors.add(selector));
+            if (ike.messageId !== undefined) observationMessageIds.add(ike.messageId);
             if (ike.ikeVersion) {
               detectedIkeVersion =
                 ike.ikeVersion;
@@ -1646,7 +2035,9 @@ export async function parseUploadedFile(
             }
 
             info =
-              `${ike.ikeVersion || 'IKE'} ${exchangeName(exchange || 0)}`;
+              `${ike.ikeVersion || 'IKE'} ${ike.ikeVersion === 'IKEv1'
+                ? ikeV1ExchangeName(exchange || 0)
+                : exchangeName(exchange || 0)}`;
 
             if (
               ike.proposals.length > 0
@@ -1654,10 +2045,20 @@ export async function parseUploadedFile(
               info +=
                 ` | ${ike.proposals.length} SA proposal(s)`;
             }
-          } else {
-            info =
-              'IKE/ISAKMP UDP datagram';
-          }
+        } else if (isNatTraversal && udp.payloadOffset + 8 <= packet.length) {
+          protocol = 'ESP';
+          observationEspPackets++;
+          const spiValue = readU32(packet, udp.payloadOffset);
+          const seqValue = readU32(packet, udp.payloadOffset + 4);
+          spi = `0x${spiValue.toString(16).padStart(8, '0')}`;
+          seq = seqValue;
+          observationEspSpis.add(spi);
+          observationEspDirections.add(`${srcIp} → ${dstIp}`);
+          if (observationEspSequenceSet.has(seqValue)) observationEspDuplicates.add(seqValue);
+          if (observationEspSequences.length > 0 && seqValue < observationEspSequences[observationEspSequences.length - 1]) observationEspOutOfOrder = true;
+          observationEspSequenceSet.add(seqValue);
+          observationEspSequences.push(seqValue);
+          info = `ESP-in-UDP Encrypted Datagram | SPI ${spi} | Seq ${seq}`;
         } else {
           protocol = 'UDP';
 
@@ -1675,6 +2076,7 @@ export async function parseUploadedFile(
       ipProtocol === IPPROTO_ESP
     ) {
       protocol = 'ESP';
+      observationEspPackets++;
 
       if (
         transportOffset + 8 <=
@@ -1697,6 +2099,13 @@ export async function parseUploadedFile(
             .toString(16)
             .padStart(8, '0')}`;
 
+          observationEspSpis.add(spi);
+          observationEspDirections.add(`${srcIp} → ${dstIp}`);
+          if (observationEspSequenceSet.has(seqValue)) observationEspDuplicates.add(seqValue);
+          if (observationEspSequences.length > 0 && seqValue < observationEspSequences[observationEspSequences.length - 1]) observationEspOutOfOrder = true;
+          observationEspSequenceSet.add(seqValue);
+          observationEspSequences.push(seqValue);
+
         seq = seqValue;
 
         info =
@@ -1715,9 +2124,20 @@ export async function parseUploadedFile(
       ipProtocol === IPPROTO_AH
     ) {
       protocol = 'AH';
+      observationAhPackets++;
 
-      info =
-        'AH Authentication Header';
+      if (transportOffset + 12 <= packet.length) {
+        const ahPayloadLength = (packet[transportOffset + 1] + 2) * 4;
+        const ahSpiValue = readU32(packet, transportOffset + 4);
+        const ahSequence = readU32(packet, transportOffset + 8);
+        spi = `0x${ahSpiValue.toString(16).padStart(8, '0')}`;
+        seq = ahSequence;
+        observationAhSpis.add(spi);
+        observationAhSequences.push(ahSequence);
+        info = `AH Authentication Header | SPI ${spi} | Seq ${seq} | Length ${ahPayloadLength}`;
+      } else {
+        info = 'AH packet with incomplete header';
+      }
     }
 
     /* -----------------------------------------------
@@ -1728,6 +2148,7 @@ export async function parseUploadedFile(
       ipProtocol === IPPROTO_ICMP
     ) {
       protocol = 'ICMP';
+      observationIcmpPackets++;
 
       info =
         'ICMP Control Message';
@@ -1743,6 +2164,8 @@ export async function parseUploadedFile(
        */
       info =
         `IP protocol ${ipProtocol}`;
+
+      if (ipProtocol === IPPROTO_TCP) observationTcpPackets++;
     }
 
     /* -----------------------------------------------
@@ -1768,6 +2191,9 @@ export async function parseUploadedFile(
       spi,
       seq,
       rawPreview,
+      sourcePort,
+      destPort,
+      ipVersion: detectedIpVersion,
     });
 
     packetLengths.push(
@@ -2037,6 +2463,57 @@ export async function parseUploadedFile(
       })),
     };
 
+  const observations: CaptureObservations = {
+    totalPackets: packets.length,
+    ikePackets: observationIkePackets,
+    espPackets: observationEspPackets,
+    ahPackets: observationAhPackets,
+    udpPackets: observationUdpPackets,
+    tcpPackets: observationTcpPackets,
+    icmpPackets: observationIcmpPackets,
+    ikeExchanges: Array.from(observationIkeExchanges),
+    ikePayloads: Array.from(observationIkePayloads),
+    ikeMessageIds: Array.from(observationMessageIds),
+    ikeFlags: Array.from(observationIkeFlags),
+    ikeNotifications: Array.from(observationIkeNotifications),
+    ikeVendorIds: Array.from(observationIkeVendorIds),
+    natDetection: Array.from(observationIkeNotifications).some((value) => value.includes('NAT_DETECTION'))
+      ? 'Detected'
+      : observationIkePackets > 0
+      ? 'Not detected'
+      : 'Not determinable',
+    fragmentation: Array.from(observationIkeNotifications).includes('FRAGMENTATION_SUPPORTED')
+      ? 'Supported'
+      : observationIkePackets > 0
+      ? 'Not observed'
+      : 'Not determinable',
+    trafficSelectors: Array.from(observationTrafficSelectors),
+    natTraversal: observationNatTraversal ? 'Detected' : 'Not detected',
+    espSpis: Array.from(observationEspSpis),
+    ahSpis: Array.from(observationAhSpis),
+    ahSequenceRange: observationAhSequences.length > 0
+      ? `${Math.min(...observationAhSequences)} - ${Math.max(...observationAhSequences)}`
+      : 'Not observed',
+    espFlowDirections: Array.from(observationEspDirections),
+    captureDurationMs: timestamps.length > 1 ? timestamps[timestamps.length - 1] : 0,
+    espSequenceRange: observationEspSequences.length > 0
+      ? `${Math.min(...observationEspSequences)} - ${Math.max(...observationEspSequences)}`
+      : 'Not observed',
+    espDuplicateSequences: Array.from(observationEspDuplicates),
+    espOutOfOrder: observationEspOutOfOrder ? 'Observed' : 'Not observed',
+    espExtendedSequenceNumbers: 'Not determined',
+    linkTypes: Array.from(observationLinkTypes),
+    captureNotes: [
+      observationIkePayloads.has('ENCRYPTED')
+        ? 'IKE_AUTH encrypted payload contents were not decoded without session keys.'
+        : '',
+      observationEspPackets > 0
+        ? 'Replay window configuration is not carried in ESP packets.'
+        : '',
+    ].filter(Boolean),
+  };
+  sa.observations = observations;
+
   /* =====================================================
      ESP features
   ===================================================== */
@@ -2126,6 +2603,9 @@ export async function parseUploadedFile(
 
       calculatedEntropy:
         entropy,
+
+      flowDurationMs:
+        timestamps.length > 1 ? timestamps[timestamps.length - 1] : 0,
     };
 
   /* =====================================================

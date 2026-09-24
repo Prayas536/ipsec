@@ -1,29 +1,38 @@
-import React, { useState, useMemo } from 'react';
-import { VpnCaptureScenario } from './types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { VpnCaptureScenario, GatewaySummary, GatewayCorrelationResult } from './types';
 import { auditIpsecSecurity } from './utils/securityAuditor';
 import { classifyEspTraffic } from './utils/aiClassifier';
 import { parseUploadedFile } from './utils/pcapParser';
-import { Header } from './components/Header';
+import { buildGatewayTelemetrySummary, fetchAnalysisTelemetry, parseWithScapy, registerAnalysis } from './utils/scapyClient';
+import { addSecurityAssociationEvidence } from './analysis/evidence';
+import { Header, AppNavView } from './components/Header';
+import { DashboardView } from './components/DashboardView';
+import { ReportsView } from './components/ReportsView';
 import { MetricCards } from './components/MetricCards';
 import { AiTrafficAnalysis } from './components/AiTrafficAnalysis';
 import { SecurityAssessment } from './components/SecurityAssessment';
 import { PacketViewer } from './components/PacketViewer';
 import { ReportModal } from './components/ReportModal';
 import { TestbedGeneratorModal } from './components/TestbedGeneratorModal';
-import { 
-  Shield, 
-  ShieldAlert, 
-  Cpu, 
-  Terminal, 
-  Sliders, 
-  CheckCircle2, 
-  FileText, 
-  UploadCloud, 
-  FileCheck, 
-  AlertTriangle,
+import { GatewaysManager } from './components/GatewaysManager';
+import { GatewayDetailsModal } from './components/GatewayDetailsModal';
+import { GatewayReportModal } from './components/GatewayReportModal';
+import { AddGatewayModal } from './components/AddGatewayModal';
+import { fetchGateways } from './utils/gatewayClient';
+import {
+  Shield,
+  ShieldAlert,
+  Cpu,
+  Terminal,
+  Sliders,
+  CheckCircle2,
+  FileText,
+  UploadCloud,
+  FileCheck,
   Code2,
   Copy,
-  Check
+  Check,
+  Server,
 } from 'lucide-react';
 
 export default function App() {
@@ -31,9 +40,20 @@ export default function App() {
   const [selectedScenario, setSelectedScenario] = useState<VpnCaptureScenario | null>(null);
   const [activeTab, setActiveTab] = useState<'SECURITY' | 'AI_TRAFFIC' | 'PACKETS'>('SECURITY');
 
+  // Top-level view navigation
+  const [currentView, setCurrentView] = useState<AppNavView>('ANALYSIS');
+
+  // Gateway count and available gateways for Mode 3 correlation
+  const [gatewayCount, setGatewayCount] = useState(0);
+  const [availableGateways, setAvailableGateways] = useState<GatewaySummary[]>([]);
+  const [selectedGatewayId, setSelectedGatewayId] = useState<string>('');
+
   // Modals
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isTestbedOpen, setIsTestbedOpen] = useState(false);
+  const [isAddGatewayOpen, setIsAddGatewayOpen] = useState(false);
+  const [selectedDetailGatewayId, setSelectedDetailGatewayId] = useState<string | null>(null);
+  const [selectedReportGatewayId, setSelectedReportGatewayId] = useState<string | null>(null);
 
   // Drag & Drop State
   const [isDragging, setIsDragging] = useState(false);
@@ -42,10 +62,27 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState(false);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
-  };
+  }, []);
+
+  // Fetch gateway count and list for nav badge and Mode 3 selection, auto-refresh every 15 seconds
+  const refreshGatewayCount = useCallback(async () => {
+    try {
+      const gws = await fetchGateways();
+      setGatewayCount(gws.length);
+      setAvailableGateways(gws);
+    } catch {
+      // API may not be running — silently ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshGatewayCount();
+    const timer = setInterval(refreshGatewayCount, 15000);
+    return () => clearInterval(timer);
+  }, [refreshGatewayCount]);
 
   // Compute security assessment & AI classification dynamically for the selected real scenario
   const scorecard = useMemo(() => {
@@ -58,35 +95,129 @@ export default function App() {
     return classifyEspTraffic(selectedScenario.features);
   }, [selectedScenario]);
 
-  const processFile = async (file: File) => {
+  const processFile = async (file: File, gatewayOverride?: string) => {
     try {
-      showToast(`Parsing real capture "${file.name}"...`);
-      const parsed = await parseUploadedFile(file);
+      const activeGwId = gatewayOverride !== undefined ? gatewayOverride : (selectedGatewayId || undefined);
+      showToast(
+        activeGwId
+          ? `Analyzing capture "${file.name}" & correlating with gateway...`
+          : `Analyzing real capture "${file.name}" with Scapy...`
+      );
+
+      let parsed;
+      try {
+        parsed = await parseWithScapy(file);
+      } catch (scapyError) {
+        console.warn('Scapy analyzer unavailable; using browser parser.', scapyError);
+        parsed = await parseUploadedFile(file);
+      }
 
       if (parsed.packets.length === 0) {
         showToast('No packets found in capture file.');
         return;
       }
 
+      let analysisId: string | undefined;
+      let initialTelemetry = null;
+      try {
+        const analysis = await registerAnalysis(file, activeGwId);
+        analysisId = analysis.analysisId;
+        initialTelemetry = analysis.gatewayTelemetry ?? null;
+      } catch (analysisError) {
+        console.warn('Central analysis registration unavailable; continuing with local PCAP analysis only.', analysisError);
+      }
+
+      const packetSpis: string[] = (parsed.packets || [])
+        .map((p) => p.spi)
+        .filter((spi): spi is string => typeof spi === 'string' && spi.trim().length > 0);
+      const obsSpis: string[] = parsed.sa?.observations?.espSpis ?? [];
+      const pcapSpis: string[] = Array.from(new Set<string>([...obsSpis, ...packetSpis]));
+
+      let telemetrySummary = initialTelemetry;
+      if (analysisId && !telemetrySummary && activeGwId) {
+        try {
+          telemetrySummary = await fetchAnalysisTelemetry(analysisId, activeGwId);
+        } catch (telemetryError) {
+          console.warn('Gateway telemetry could not be fetched for this analysis.', telemetryError);
+        }
+      }
+
+      const defaultCorrelation: GatewayCorrelationResult = {
+        correlation_status: 'UNKNOWN',
+        matched: [],
+        unmatchedTelemetry: [],
+        unmatchedPcapSpis: pcapSpis,
+      };
+
+      const mergedTelemetry = telemetrySummary ?? buildGatewayTelemetrySummary({
+        analysisId,
+        pcapSpis,
+        telemetry: [],
+        correlation: defaultCorrelation,
+      });
+
+      const matchedGw = activeGwId ? availableGateways.find((g) => g.gateway_id === activeGwId) : undefined;
       const newScenario: VpnCaptureScenario = {
         id: `uploaded-${Date.now()}`,
         name: parsed.scenarioName,
-        organization: 'Real Captured Network Trace',
-        badge: 'Live Capture File',
-        description: `Parsed from "${file.name}" (${(parsed.fileSizeBytes / 1024).toFixed(1)} KB) containing ${parsed.packets.length} analyzed packets.`,
-        sa: parsed.sa,
+        organization: matchedGw ? `Gateway: ${matchedGw.display_name}` : 'Real Captured Network Trace',
+        badge: activeGwId ? 'Mode 3 Combined' : 'Live Capture File',
+        description: `Parsed from "${file.name}" (${(parsed.fileSizeBytes / 1024).toFixed(1)} KB) containing ${parsed.packets.length} analyzed packets.${
+          activeGwId ? ` Correlated against gateway ${matchedGw?.display_name || activeGwId}.` : ''
+        }`,
+        sa: addSecurityAssociationEvidence(parsed.sa),
         features: parsed.features,
         packets: parsed.packets,
         actualTrafficType: 'Live Real Capture',
+        gatewayTelemetry: mergedTelemetry,
+        correlation: mergedTelemetry.correlation,
       };
 
       setScenarios((prev) => [newScenario, ...prev]);
       setSelectedScenario(newScenario);
-      showToast(`Analyzed ${parsed.packets.length} packets from "${file.name}"!`);
+      // Switch to analysis view when a file is uploaded from Gateways view
+      setCurrentView('ANALYSIS');
+      showToast(
+        activeGwId
+          ? `Analysis & Gateway correlation complete: ${mergedTelemetry.correlationStatus}`
+          : `Analyzed ${parsed.packets.length} packets from "${file.name}"!`
+      );
     } catch (err: unknown) {
       console.error(err);
       const errorMsg = err instanceof Error ? err.message : 'Ensure it is a valid .pcap or network capture.';
       showToast(`Error parsing file: ${errorMsg}`);
+    }
+  };
+
+  const correlateLoadedScenario = async (gatewayId: string) => {
+    if (!selectedScenario) return;
+    try {
+      showToast(`Correlating loaded capture with gateway ${gatewayId}...`);
+      const analysisId = selectedScenario.gatewayTelemetry?.analysisId;
+      if (!analysisId) {
+        showToast('No central analysis ID found for this session.');
+        return;
+      }
+      const telemetrySummary = await fetchAnalysisTelemetry(analysisId, gatewayId);
+      if (telemetrySummary) {
+        setSelectedScenario((prev) => {
+          if (!prev) return prev;
+          const matchedGw = availableGateways.find((g) => g.gateway_id === gatewayId);
+          return {
+            ...prev,
+            organization: matchedGw ? `Gateway: ${matchedGw.display_name}` : prev.organization,
+            badge: 'Mode 3 Combined',
+            gatewayTelemetry: telemetrySummary,
+            correlation: telemetrySummary.correlation,
+          };
+        });
+        showToast(`Correlation updated: ${telemetrySummary.correlationStatus}`);
+      } else {
+        showToast('Could not retrieve telemetry for this gateway.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Network error';
+      showToast(`Correlation failed: ${msg}`);
     }
   };
 
@@ -118,6 +249,7 @@ export default function App() {
   const handleLoadCustomScenario = (scenario: VpnCaptureScenario) => {
     setScenarios((prev) => [scenario, ...prev]);
     setSelectedScenario(scenario);
+    setCurrentView('ANALYSIS');
     showToast(`Loaded testbed configuration: ${scenario.name}`);
   };
 
@@ -135,12 +267,12 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-      
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-blue-600 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-2 border border-blue-400/40 animate-fade-in">
-          <CheckCircle2 className="w-4 h-4" />
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 border border-slate-700 animate-fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -149,225 +281,339 @@ export default function App() {
       <Header
         scenarios={scenarios}
         selectedScenario={selectedScenario}
-        onSelectScenario={setSelectedScenario}
+        onSelectScenario={(s) => {
+          setSelectedScenario(s);
+          setCurrentView('ANALYSIS');
+        }}
         onOpenReport={() => setIsReportOpen(true)}
         onOpenTestbed={() => setIsTestbedOpen(true)}
         onFileUpload={handleFileUpload}
         onClearTraces={handleClearTraces}
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        gatewayCount={gatewayCount}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        
-        {/* If no real file has been uploaded yet, show Clean Upload & Testbed Hub */}
-        {!selectedScenario ? (
-          <div className="space-y-6 py-4">
-            
-            {/* Main Dropzone Card */}
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-2xl p-10 text-center transition-all flex flex-col items-center justify-center ${
-                isDragging
-                  ? 'border-blue-500 bg-blue-950/30'
-                  : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900/80'
-              }`}
-            >
-              <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mb-4 shadow-inner">
-                <UploadCloud className="w-8 h-8" />
-              </div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
 
-              <h2 className="text-xl font-bold text-white mb-1">
-                Upload Real Network Capture (.pcap / .pcapng)
-              </h2>
-              <p className="text-xs text-slate-400 max-w-lg mx-auto mb-6 leading-relaxed">
-                All mock/dummy scenarios have been removed. Drag and drop your real IPsec network capture file here, or click below to analyze actual IKE handshakes and ESP encrypted traffic flows.
-              </p>
+        {/* ─── DASHBOARD VIEW ─── */}
+        {currentView === 'DASHBOARD' && (
+          <DashboardView
+            gateways={availableGateways}
+            scenarios={scenarios}
+            onNavigateToAnalysis={() => setCurrentView('ANALYSIS')}
+            onNavigateToGateways={() => setCurrentView('GATEWAYS')}
+            onNavigateToReports={() => setCurrentView('REPORTS')}
+            onSelectScenario={(s) => {
+              setSelectedScenario(s);
+              setCurrentView('ANALYSIS');
+            }}
+            onAddGateway={() => setIsAddGatewayOpen(true)}
+            onViewGateway={(id) => {
+              setSelectedDetailGatewayId(id);
+            }}
+          />
+        )}
 
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <label
-                  htmlFor="dropzone-file"
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer transition-all flex items-center gap-2"
-                >
-                  <FileCheck className="w-4 h-4" />
-                  <span>Select .PCAP File</span>
-                  <input
-                    id="dropzone-file"
-                    type="file"
-                    accept=".pcap,.pcapng,.cap"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
+        {/* ─── REPORTS VIEW ─── */}
+        {currentView === 'REPORTS' && (
+          <ReportsView
+            scenarios={scenarios}
+            gateways={availableGateways}
+            onViewScenarioReport={(s) => {
+              setSelectedScenario(s);
+              setIsReportOpen(true);
+            }}
+            onViewGatewayReport={(gwId) => {
+              setSelectedReportGatewayId(gwId);
+            }}
+          />
+        )}
 
-                <button
-                  onClick={() => setIsTestbedOpen(true)}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <Sliders className="w-4 h-4 text-blue-400" />
-                  <span>Generate Testbed Capture</span>
-                </button>
-              </div>
+        {/* ─── GATEWAYS VIEW ─── */}
+        {currentView === 'GATEWAYS' && (
+          <GatewaysManager
+            onSelectGatewayForAnalysis={(gatewayId) => {
+              setSelectedGatewayId(gatewayId);
+              setCurrentView('ANALYSIS');
+              if (selectedScenario) {
+                correlateLoadedScenario(gatewayId);
+              } else {
+                showToast(`Gateway selected. Upload a PCAP to perform Mode 3 correlation.`);
+              }
+            }}
+            onShowToast={showToast}
+          />
+        )}
 
-              <div className="mt-6 flex items-center gap-4 text-[11px] text-slate-400">
-                <span>Supported: Standard Libpcap (.pcap), tcpdump, Wireshark, pcapng</span>
-              </div>
-            </div>
-
-            {/* Real Capture Command Guide */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* How to capture on Linux */}
-              <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-white text-xs font-bold">
-                    <Terminal className="w-4 h-4 text-emerald-400" />
-                    <span>How to Capture on Linux (tcpdump)</span>
-                  </div>
-                  <button
-                    onClick={handleCopyTcpdump}
-                    className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-800 border border-slate-700 cursor-pointer"
-                  >
-                    {copiedCmd ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedCmd ? 'Copied' : 'Copy'}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Run this command on your VPN client or gateway to capture IKE UDP 500/4500 handshakes and IP Protocol 50 (ESP):
-                </p>
-                <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800/80 font-mono text-[11px] text-emerald-300 break-all select-all">
-                  sudo tcpdump -i any -nn -s 0 -w ipsec_capture.pcap "udp port 500 or udp port 4500 or proto 50"
-                </div>
-              </div>
-
-              {/* How to capture in Wireshark */}
-              <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                <div className="flex items-center gap-2 text-white text-xs font-bold">
-                  <Code2 className="w-4 h-4 text-blue-400" />
-                  <span>How to Capture in Wireshark</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  1. Open Wireshark and set the capture filter to: <code className="text-blue-300 bg-slate-950 px-1 py-0.5 rounded">udp port 500 or udp port 4500 or esp</code>
-                </p>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  2. Establish the IPsec connection and generate network traffic over the tunnel.
-                </p>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  3. Save capture as <code className="text-amber-300 bg-slate-950 px-1 py-0.5 rounded">.pcap</code> and drag it into the dropzone above.
-                </p>
-              </div>
-
-            </div>
-
-          </div>
-        ) : (
-          /* When a real capture file is loaded, show the full live inspection interface */
+        {/* ─── ANALYSIS VIEW ─── */}
+        {currentView === 'ANALYSIS' && (
           <>
-            {/* Active Context Banner */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
-                    {selectedScenario.badge}
-                  </span>
-                  <h2 className="text-base font-bold text-white">
-                    {selectedScenario.name}
+            {/* If no real file has been uploaded yet, show Clean Upload & Testbed Hub */}
+            {!selectedScenario ? (
+              <div className="space-y-5 py-2">
+
+                {/* Main Upload Zone */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-lg p-10 text-center transition-all flex flex-col items-center justify-center ${
+                    isDragging
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 text-slate-400 flex items-center justify-center mb-4">
+                    <UploadCloud className="w-6 h-6" />
+                  </div>
+
+                  <h2 className="text-base font-semibold text-slate-900 mb-1">
+                    Upload Network Capture
                   </h2>
-                  <span className="text-xs text-slate-400">
-                    • {selectedScenario.organization}
-                  </span>
+                  <p className="text-sm text-slate-500 max-w-lg mx-auto mb-6 leading-relaxed">
+                    Drop a <code className="font-mono bg-slate-100 px-1 rounded text-xs">.pcap</code> or <code className="font-mono bg-slate-100 px-1 rounded text-xs">.pcapng</code> file here to analyze real IKE handshakes and ESP traffic flows.
+                  </p>
+
+                  {/* Mode 1 vs Mode 3 Gateway Correlation Selector */}
+                  <div className="mb-6 w-full max-w-md mx-auto p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-left">
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="gateway-mode-select" className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                        <Server className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Analysis Mode</span>
+                      </label>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
+                        selectedGatewayId
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}>
+                        {selectedGatewayId ? 'MODE 3: COMBINED' : 'MODE 1: PCAP ONLY'}
+                      </span>
+                    </div>
+                    <select
+                      id="gateway-mode-select"
+                      value={selectedGatewayId}
+                      onChange={(e) => setSelectedGatewayId(e.target.value)}
+                      className="w-full text-xs font-mono bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    >
+                      <option value="">No Gateway (Mode 1 — PCAP Analysis Only)</option>
+                      {availableGateways.map((gw) => (
+                        <option key={gw.gateway_id} value={gw.gateway_id}>
+                          {gw.display_name} [{gw.status}] — Mode 3 Correlation
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1.5">
+                      {selectedGatewayId
+                        ? '✓ Exact SPI correlation will match packet ESP headers against this gateway\'s SA telemetry.'
+                        : 'Analyzes cryptographic handshakes and encrypted traffic directly from PCAP packets without gateway telemetry.'}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    <label
+                      htmlFor="dropzone-file"
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm cursor-pointer transition-colors flex items-center gap-2"
+                    >
+                      <FileCheck className="w-3.5 h-3.5" />
+                      <span>{selectedGatewayId ? 'Select .PCAP & Correlate' : 'Select .PCAP File'}</span>
+                      <input
+                        id="dropzone-file"
+                        type="file"
+                        accept=".pcap,.pcapng,.cap"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <button
+                      onClick={() => setIsTestbedOpen(true)}
+                      className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Generate Testbed Capture</span>
+                    </button>
+
+                    <button
+                      onClick={() => setCurrentView('GATEWAYS')}
+                      className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <Shield className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Manage Gateways</span>
+                    </button>
+                  </div>
+
+                  <div className="mt-4 text-[11px] text-slate-400">
+                    Supported: Standard Libpcap (.pcap), tcpdump, Wireshark, pcapng
+                  </div>
                 </div>
-                <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-                  {selectedScenario.description}
-                </p>
+
+                {/* Capture Command Reference */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                  {/* Linux tcpdump */}
+                  <div className="p-4 rounded-lg bg-white border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-slate-800 text-xs font-semibold">
+                        <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Capture on Linux (tcpdump)</span>
+                      </div>
+                      <button
+                        onClick={handleCopyTcpdump}
+                        className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 px-2 py-1 rounded bg-slate-100 border border-slate-200 cursor-pointer"
+                      >
+                        {copiedCmd ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedCmd ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Run as root on your VPN gateway to capture IKE and ESP traffic:
+                    </p>
+                    <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-700 font-mono text-[11px] text-emerald-400 break-all select-all">
+                      sudo tcpdump -i any -nn -s 0 -w ipsec_capture.pcap "udp port 500 or udp port 4500 or proto 50"
+                    </div>
+                  </div>
+
+                  {/* Wireshark */}
+                  <div className="p-4 rounded-lg bg-white border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center gap-2 text-slate-800 text-xs font-semibold">
+                      <Code2 className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Capture in Wireshark</span>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] text-slate-500 leading-relaxed">
+                      <p>1. Set the capture filter to: <code className="text-blue-600 bg-slate-100 px-1 py-0.5 rounded font-mono">udp port 500 or udp port 4500 or esp</code></p>
+                      <p>2. Establish the IPsec connection and generate traffic over the tunnel.</p>
+                      <p>3. Save capture as <code className="text-amber-600 bg-slate-100 px-1 py-0.5 rounded font-mono">.pcap</code> and drag it into the dropzone above.</p>
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
+            ) : (
+              /* When a capture file is loaded — full live inspection interface */
+              <>
+                {/* Active Context Banner */}
+                <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-mono uppercase">
+                        {selectedScenario.badge}
+                      </span>
+                      <h2 className="text-sm font-semibold text-slate-900">
+                        {selectedScenario.name}
+                      </h2>
+                      <span className="text-xs text-slate-400">
+                        · {selectedScenario.organization}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed max-w-3xl">
+                      {selectedScenario.description}
+                    </p>
+                  </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  id="btn-quick-report"
-                  onClick={() => setIsReportOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5 text-blue-400" />
-                  <span>View Full Report</span>
-                </button>
-              </div>
-            </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {/* Mode 3 Gateway Switcher for loaded capture */}
+                    {availableGateways.length > 0 && (
+                      <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs">
+                        <Server className="w-3.5 h-3.5 text-blue-600" />
+                        <span className="text-[11px] text-slate-500">Gateway:</span>
+                        <select
+                          value={selectedGatewayId}
+                          onChange={(e) => {
+                            const gwId = e.target.value;
+                            setSelectedGatewayId(gwId);
+                            if (gwId) {
+                              correlateLoadedScenario(gwId);
+                            }
+                          }}
+                          className="bg-transparent text-xs font-mono text-slate-700 border-none focus:outline-none cursor-pointer"
+                        >
+                          <option value="">None (PCAP Only)</option>
+                          {availableGateways.map((gw) => (
+                            <option key={gw.gateway_id} value={gw.gateway_id}>
+                              {gw.display_name} ({gw.status})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-            {/* 4 Primary Metric Cards */}
-            {scorecard && aiPrediction && (
-              <MetricCards
-                sa={selectedScenario.sa}
-                scorecard={scorecard}
-                aiPrediction={aiPrediction}
-                actualTrafficType={selectedScenario.actualTrafficType}
-              />
-            )}
+                    <button
+                      id="btn-quick-report"
+                      onClick={() => setIsReportOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 transition-colors cursor-pointer shadow-xs"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-blue-600" />
+                      <span>View Report</span>
+                    </button>
+                  </div>
+                </div>
 
-            {/* Section Navigation Tabs */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="inline-flex rounded-xl bg-slate-900 p-1 border border-slate-800 gap-1">
-                <button
-                  id="tab-btn-security"
-                  onClick={() => setActiveTab('SECURITY')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    activeTab === 'SECURITY'
-                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>Security Assessment &amp; Threat Matrix</span>
-                </button>
+                {/* Metric Cards */}
+                {scorecard && aiPrediction && (
+                  <MetricCards
+                    sa={selectedScenario.sa}
+                    scorecard={scorecard}
+                    aiPrediction={aiPrediction}
+                    actualTrafficType={selectedScenario.actualTrafficType}
+                  />
+                )}
 
-                <button
-                  id="tab-btn-ai"
-                  onClick={() => setActiveTab('AI_TRAFFIC')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    activeTab === 'AI_TRAFFIC'
-                      ? 'bg-purple-600 text-white shadow-sm shadow-purple-500/20'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Cpu className="w-3.5 h-3.5" />
-                  <span>AI Traffic Fingerprinting (ESP)</span>
-                </button>
+                {/* Analysis Navigation Tabs */}
+                <div className="flex items-center justify-between border-b border-slate-200 pb-0">
+                  <div className="flex items-center gap-0">
+                    {[
+                      { key: 'SECURITY' as const, label: 'Security Assessment', icon: ShieldAlert },
+                      { key: 'AI_TRAFFIC' as const, label: 'AI Traffic Analysis', icon: Cpu },
+                      { key: 'PACKETS' as const, label: `Packets (${selectedScenario.packets.length})`, icon: Terminal },
+                    ].map(({ key, label, icon: Icon }) => (
+                      <button
+                        key={key}
+                        id={`tab-btn-${key.toLowerCase()}`}
+                        onClick={() => setActiveTab(key)}
+                        className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors cursor-pointer -mb-px ${
+                          activeTab === key
+                            ? 'border-blue-600 text-blue-600 bg-white'
+                            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
 
-                <button
-                  id="tab-btn-packets"
-                  onClick={() => setActiveTab('PACKETS')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    activeTab === 'PACKETS'
-                      ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-500/20'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Terminal className="w-3.5 h-3.5" />
-                  <span>Packet Dissector &amp; Traces ({selectedScenario.packets.length})</span>
-                </button>
-              </div>
+                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 pb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>Live Analysis Active</span>
+                  </div>
+                </div>
 
-              <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Live Dissector Engine Active</span>
-              </div>
-            </div>
+                {/* Tab Content */}
+                <div className="pt-1">
+                  {activeTab === 'SECURITY' && scorecard && (
+                    <SecurityAssessment
+                      scorecard={scorecard}
+                      sa={selectedScenario.sa}
+                      gatewayTelemetry={selectedScenario.gatewayTelemetry}
+                      correlation={selectedScenario.correlation}
+                    />
+                  )}
 
-            {/* Tab Content Display */}
-            {activeTab === 'SECURITY' && scorecard && (
-              <SecurityAssessment scorecard={scorecard} sa={selectedScenario.sa} />
-            )}
+                  {activeTab === 'AI_TRAFFIC' && aiPrediction && (
+                    <AiTrafficAnalysis
+                      features={selectedScenario.features}
+                      prediction={aiPrediction}
+                    />
+                  )}
 
-            {activeTab === 'AI_TRAFFIC' && aiPrediction && (
-              <AiTrafficAnalysis
-                features={selectedScenario.features}
-                prediction={aiPrediction}
-              />
-            )}
-
-            {activeTab === 'PACKETS' && (
-              <PacketViewer packets={selectedScenario.packets} />
+                  {activeTab === 'PACKETS' && (
+                    <PacketViewer packets={selectedScenario.packets} />
+                  )}
+                </div>
+              </>
             )}
           </>
         )}
@@ -375,13 +621,13 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-4 px-6 text-center text-xs text-slate-400">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="border-t border-slate-200 bg-white py-3 px-6">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
           <div>
-            Smart India Hackathon 2026 | Problem Statement 26160
+            Smart India Hackathon 2026 · Problem Statement 26160
           </div>
-          <div className="text-slate-400">
-            Target Organization: <strong>National Technical Research Organisation (NTRO)</strong>
+          <div>
+            Target Organization: <span className="font-medium text-slate-500">National Technical Research Organisation (NTRO)</span>
           </div>
         </div>
       </footer>
@@ -401,6 +647,32 @@ export default function App() {
         isOpen={isTestbedOpen}
         onClose={() => setIsTestbedOpen(false)}
         onLoadCustomScenario={handleLoadCustomScenario}
+      />
+
+      <GatewayDetailsModal
+        gatewayId={selectedDetailGatewayId}
+        isOpen={!!selectedDetailGatewayId}
+        onClose={() => setSelectedDetailGatewayId(null)}
+        onGatewayUpdated={refreshGatewayCount}
+        onGatewayRemoved={refreshGatewayCount}
+      />
+
+      <GatewayReportModal
+        isOpen={!!selectedReportGatewayId}
+        onClose={() => setSelectedReportGatewayId(null)}
+        gatewayId={selectedReportGatewayId}
+      />
+
+      <AddGatewayModal
+        isOpen={isAddGatewayOpen}
+        onClose={() => setIsAddGatewayOpen(false)}
+        onGatewayAdded={() => {
+          refreshGatewayCount();
+          showToast('Gateway enrolled successfully.');
+        }}
+        onViewGateway={(id) => {
+          setSelectedDetailGatewayId(id);
+        }}
       />
 
     </div>

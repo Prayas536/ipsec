@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cpu, Activity, Info, BarChart2, Zap, HelpCircle } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { AiPrediction, EspTrafficFeatures } from '../types';
 
 interface AiTrafficAnalysisProps {
@@ -7,191 +7,126 @@ interface AiTrafficAnalysisProps {
   prediction: AiPrediction;
 }
 
-export const AiTrafficAnalysis: React.FC<AiTrafficAnalysisProps> = ({
-  features,
-  prediction,
-}) => {
+export const AiTrafficAnalysis: React.FC<AiTrafficAnalysisProps> = ({ features, prediction }) => {
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
+    <div className="space-y-6">
       
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-purple-950/80 border border-purple-800 flex items-center justify-center text-purple-400">
-            <Cpu className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <span>AI Encrypted Traffic Fingerprinting (ESP Payload)</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 font-semibold">
-                Supervised Random Forest / Shape Analysis
-              </span>
-            </h3>
-            <p className="text-xs text-slate-400">
-              Inferring application protocols hidden inside opaque ciphertext without decryption
-            </p>
-          </div>
-        </div>
-
-        {/* Confidence Badge */}
-        <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60 self-start sm:self-auto">
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span className="text-xs text-slate-300">Model Confidence:</span>
-          <span className="text-xs font-bold text-emerald-400">
-            {prediction.confidenceScore}%
-          </span>
+      {/* Section Info Banner */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-3">
+        <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-800">
+          <strong>Where AI operates:</strong> ESP payloads are cryptographically unreadable. The classifier analyzes statistical frame patterns — packet length distribution, inter-arrival timing, burst cadence, and flow symmetry — to infer workload type without breaking encryption.
         </div>
       </div>
 
-      {/* Honest Architecture Explainer Banner */}
-      <div className="mt-4 p-3 bg-blue-950/30 border border-blue-900/50 rounded-lg text-xs text-blue-200 flex items-start gap-2.5">
-        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-        <div>
-          <strong className="text-blue-300 font-semibold">Where Real AI Operates (NTRO Assessment Core):</strong>{' '}
-          Reading algorithm names from the IKE handshake is <em>deterministic parsing</em>. In contrast, ESP packets are cryptographically unreadable. The machine learning model analyzes the statistical "shape"—packet length distributions, inter-arrival time (IAT), burst cadence, and flow symmetry—to infer user activity without breaking the encryption.
-        </div>
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-      {/* Main Grid: Probability Distributions & Extracted Flow Features */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-5">
-        
-        {/* Left: Probabilities */}
-        <div className="lg:col-span-6 space-y-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <BarChart2 className="w-3.5 h-3.5 text-purple-400" />
-              Class Probabilities
-            </span>
-            <span className="text-[11px] text-slate-500">Softmax Normalized</span>
+        {/* Classification Results */}
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Traffic Classification</h3>
+              <p className="text-xs text-slate-500">Supervised Random Forest · Softmax normalized</p>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-medium text-slate-500 block">Top prediction</span>
+              <span className="text-sm font-bold text-slate-900">{prediction.predictedClass}</span>
+            </div>
           </div>
 
-          <div className="space-y-2.5">
-            {prediction.probabilities.map((item) => {
-              const isTop = item.category === prediction.predictedClass;
-              return (
-                <div
-                  key={item.category}
-                  className={`p-2.5 rounded-lg border transition-all ${
-                    isTop
-                      ? 'bg-purple-950/40 border-purple-700/80 text-white'
-                      : 'bg-slate-800/40 border-slate-800 text-slate-300'
-                  }`}
-                >
-                  <div className="flex justify-between text-xs font-medium mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      {isTop && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />}
-                      <span className={isTop ? 'font-bold text-purple-200' : ''}>{item.category}</span>
-                    </span>
-                    <span className={`font-mono font-bold ${isTop ? 'text-purple-300' : 'text-slate-400'}`}>
-                      {item.probability}%
-                    </span>
-                  </div>
-                  
-                  <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className={`h-1.5 rounded-full transition-all duration-500 ${
-                        isTop ? 'bg-gradient-to-r from-purple-500 to-blue-500' : 'bg-slate-600'
-                      }`}
-                      style={{ width: `${Math.max(item.probability, 2)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs table-compact">
+              <thead>
+                <tr>
+                  <th>Traffic Class</th>
+                  <th>Probability</th>
+                  <th className="w-40">Distribution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prediction.probabilities.map((item) => {
+                  const isTop = item.category === prediction.predictedClass;
+                  return (
+                    <tr key={item.category} className={isTop ? 'bg-blue-50' : 'hover:bg-slate-50'}>
+                      <td className={`font-medium ${isTop ? 'text-blue-800' : 'text-slate-700'}`}>
+                        <span className={isTop ? 'font-bold' : ''}>{item.category}</span>
+                      </td>
+                      <td className="font-mono font-semibold text-slate-900">{item.probability}%</td>
+                      <td>
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-1.5 rounded-full transition-all duration-300 ${isTop ? 'bg-blue-600' : 'bg-slate-400'}`}
+                            style={{ width: `${Math.max(item.probability, 2)}%` }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+            <span className="text-slate-500">Model confidence</span>
+            <span className="font-mono font-bold text-slate-900">{prediction.confidenceScore}%</span>
           </div>
         </div>
 
-        {/* Right: Feature Extraction Vectors */}
-        <div className="lg:col-span-6 space-y-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-blue-400" />
-              Extracted Statistical Shape Vector
-            </span>
-            <span className="text-[11px] text-slate-500">{features.packetCount} packets sampled</span>
+        {/* Extracted Flow Features */}
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200">
+            <h3 className="text-sm font-semibold text-slate-900">Extracted Flow Features</h3>
+            <p className="text-xs text-slate-500">Statistical shape characteristics used for classification</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Mean Packet Length</div>
-              <div className="text-base font-bold text-white mt-0.5">
-                {features.meanPacketLength} <span className="text-xs font-normal text-slate-400">bytes</span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Range: {features.minPacketLength} - {features.maxPacketLength}b</div>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Length Std. Deviation</div>
-              <div className="text-base font-bold text-white mt-0.5">
-                ±{features.stdPacketLength} <span className="text-xs font-normal text-slate-400">bytes</span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">
-                {features.stdPacketLength < 50 ? 'Low variance (Uniform stream)' : 'High variance (Variable data)'}
-              </div>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Inter-Arrival Time (IAT)</div>
-              <div className="text-base font-bold text-white mt-0.5">
-                {features.meanInterArrivalTimeMs.toFixed(1)} <span className="text-xs font-normal text-slate-400">ms</span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Packet spacing cadence</div>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Shannon Entropy</div>
-              <div className="text-base font-bold text-emerald-400 mt-0.5">
-                {features.calculatedEntropy} <span className="text-xs font-normal text-slate-400">/ 8.00</span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Verified High Ciphertext</div>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Burst Index</div>
-              <div className="text-base font-bold text-white mt-0.5">
-                {(features.burstRatio * 100).toFixed(0)}%
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Continuous vs Idle Gaps</div>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
-              <div className="text-[11px] text-slate-400">Flow Symmetry</div>
-              <div className="text-base font-bold text-white mt-0.5">
-                {(features.flowSymmetry * 100).toFixed(0)}%
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Uplink / Downlink balance</div>
-            </div>
-
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs table-compact">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="text-slate-600">Payload Entropy (bits)</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.calculatedEntropy?.toFixed(4) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Avg Packet Length (bytes)</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.meanPacketLength?.toFixed(1) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Std Dev Packet Length</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.stdPacketLength?.toFixed(1) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Mean Inter-Arrival Time (ms)</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.meanInterArrivalTimeMs?.toFixed(2) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Flow Duration (ms)</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.flowDurationMs?.toFixed(1) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">ESP Packet Count</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.packetCount ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Burst Ratio</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.burstRatio?.toFixed(2) ?? 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td className="text-slate-600">Flow Symmetry Ratio</td>
+                  <td className="font-mono font-semibold text-slate-900">{features.flowSymmetry?.toFixed(3) ?? 'N/A'}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
       </div>
-
-      {/* Feature Attribution Explainer */}
-      <div className="mt-5 pt-4 border-t border-slate-800">
-        <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-          <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
-          AI Decision Rationale &amp; Feature Attribution
-        </h4>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {prediction.primaryFeatures.map((feat, idx) => (
-            <div key={idx} className="bg-slate-800/40 border border-slate-800 p-2.5 rounded-lg text-xs">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="font-medium text-slate-300">{feat.name}</span>
-                <span className="text-[10px] font-semibold text-blue-300 bg-blue-950 px-1.5 py-0.5 rounded">
-                  {feat.value}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                {feat.explanation}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
     </div>
   );
 };

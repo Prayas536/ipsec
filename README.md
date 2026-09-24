@@ -12,12 +12,45 @@
 
 ## 📌 Executive Summary
 
+# Optional, recommended for richer Scapy-based dissection
+python -m pip install -r requirements.txt
+
 Virtual Private Networks (VPNs) built on **IPsec (Internet Protocol Security)** form the backbone of national critical infrastructure, defense networks, and inter-branch banking communications. 
 
 However, an IPsec tunnel can negotiate obsolete, vulnerable 1990s-era ciphers (e.g., 3DES, 1024-bit DH groups, missing Perfect Forward Secrecy) while still reporting **"Connected"** to network administrators. Furthermore, because ESP (Encapsulating Security Payload) encrypts network packets, traditional Deep Packet Inspection (DPI) tools fail to identify what applications are operating within the tunnel, leaving organizations blind to metadata leakage and covert communications.
 
 This framework provides an end-to-end, automated solution:
 1. **Deterministic Cryptographic Security Auditor**: Inspects IKEv1/IKEv2 handshakes and grades security posture (0–100) against **NIST SP 800-77 Rev. 1**, **RFC 8221**, and the **NSA CNSA Suite**, instantly detecting known attacks (**Sweet32**, **Logjam**, replay risks).
+
+### Capture formats and Scapy analyzer
+
+The browser parser accepts classic PCAP and valid PCAPNG files, including enhanced packet blocks, multiple sections, interface link types, and timestamp-resolution options. The upload controls accept `.pcap`, `.pcapng`, and `.cap` files.
+
+In a second terminal, run the local analyzer before uploading a capture:
+
+```bash
+python server/scapy_analyzer.py
+```
+
+It listens on `http://127.0.0.1:8765`. The browser upload flow tries this service first and falls back to the built-in parser if it is not running. Scapy adds link-layer decoding, IPv4/IPv6 dissection, UDP/IKE and ESP fields, packet-layer details, IKEv2 proposal transforms, and raw packet previews. Encrypted IKE_AUTH payloads cannot reveal inner transforms without session keys; exact cipher and DH details require a captured IKE_SA_INIT SA payload.
+
+### Local API and agent
+
+For offline API and authorized metadata ingestion, start the localhost API in another terminal:
+
+```bash
+python server/api_server.py
+```
+
+It exposes `POST /api/analyze/pcap` for raw PCAP/PCAPNG bytes and `POST /api/agent/telemetry` for authenticated, sanitized metadata. Set `VPN_ANALYZER_AGENT_TOKEN` before starting the API to enable telemetry ingestion. The API does not persist data and is not a public cloud deployment.
+
+For bounded local live capture using Scapy:
+
+```powershell
+python server/vpn_analyzer_agent.py --mode local --live --interface Ethernet --count 100 --timeout 30
+```
+
+Live capture is metadata-only and requires capture permissions for the selected operating-system interface.
 2. **AI Encrypted Traffic Fingerprinting**: Employs supervised machine learning on flow shape characteristics (packet length distributions, inter-arrival time cadence, burst ratios, and Shannon entropy) to classify applications (VoIP, Video Streaming, Web, Bulk Data, Telemetry) inside opaque ESP ciphertext **without breaking encryption**.
 3. **Interactive PCAP Dissector**: A web-based packet dissector providing frame-by-frame inspection, SPI tracking, protocol filtering, and raw hexadecimal payload views.
 4. **VPN Testbed & Remediation Generator**: Generates production-ready `strongSwan (swanctl.conf)` and `ip xfrm` scripts with custom synthetic PCAP export for automated testing.

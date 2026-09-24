@@ -17,6 +17,18 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
       description: 'The capture does not contain a decodable IKE version. No protocol security conclusion is made.',
       remediation: 'Capture the IKE_SA_INIT exchange for exact protocol evidence.',
     });
+  } else if (sa.ikeVersion === 'IKEv2' && (!sa.proposals || sa.proposals.length === 0)) {
+    findings.push({
+      id: 'F-IKE-PARTIAL',
+      parameter: 'Key Exchange Protocol',
+      detectedValue: 'IKEv2 header observed; SA proposal not decoded',
+      recommendedValue: 'IKEv2 with captured SA_INIT transforms',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Partial IKE Evidence',
+      description: 'The capture proves that an IKEv2 header was observed, but it does not provide a decoded security proposal. Cipher and DH conclusions remain unavailable.',
+      remediation: 'Capture the complete IKE_SA_INIT request and response, including their SA payloads.',
+    });
   } else if (sa.ikeVersion === 'IKEv1') {
     const penalty = 15;
     totalScore -= penalty;
@@ -74,6 +86,18 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
       description: '64-bit block ciphers like 3DES suffer from practical collision attacks after approximately 32 GB of data encrypted with the same key, enabling plaintext recovery.',
       remediation: 'Immediately decommission 3DES. Upgrade Phase 1 and Phase 2 proposals to AES-256-GCM or AES-128-GCM authenticated ciphers.',
     });
+  } else if (encUpper.includes('UNKNOWN')) {
+    findings.push({
+      id: 'F-ENC-UNKNOWN-TRANSFORM',
+      parameter: 'Symmetric Encryption Cipher',
+      detectedValue: sa.encryptionAlgorithm,
+      recommendedValue: 'Known, standards-approved cipher',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Unsupported Encryption Transform',
+      description: 'An encryption transform was observed, but this analyzer cannot map its identifier to a known algorithm.',
+      remediation: 'Use a parser version with the relevant transform registry or confirm the negotiated cipher through authorized gateway telemetry.',
+    });
   } else if (encUpper.includes('CBC')) {
     const penalty = 10;
     totalScore -= penalty;
@@ -114,6 +138,18 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
       threatName: 'DH Transform Not Captured',
       description: 'No decodable Diffie-Hellman transform was observed in the capture.',
       remediation: 'Capture an IKE_SA_INIT exchange containing the SA payload.',
+    });
+  } else if (sa.dhBits === 0 || sa.dhGroup.toUpperCase().includes('UNKNOWN')) {
+    findings.push({
+      id: 'F-DH-UNKNOWN-TRANSFORM',
+      parameter: 'Diffie-Hellman Key Exchange',
+      detectedValue: sa.dhGroup,
+      recommendedValue: 'Known DH group with documented strength',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Unsupported DH Transform',
+      description: 'A DH transform was observed, but its group strength is not known to this analyzer.',
+      remediation: 'Confirm the DH group through an updated transform registry or authorized gateway telemetry.',
     });
   } else if (sa.dhGroupNumber < 14 || sa.dhBits < 2048) {
     const penalty = 30;
@@ -202,6 +238,18 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
       description: 'MD5 and SHA-1 have proven theoretical and practical collision attacks. They are strictly prohibited under modern cryptographic standards.',
       remediation: 'Upgrade integrity transforms to HMAC-SHA256-128 or use AEAD authenticated ciphers.',
     });
+  } else if (authUpper.includes('UNKNOWN')) {
+    findings.push({
+      id: 'F-AUTH-UNKNOWN-TRANSFORM',
+      parameter: 'Integrity / Authentication Algorithm',
+      detectedValue: sa.authIntegrityAlgorithm,
+      recommendedValue: 'Known HMAC-SHA256+ or AEAD',
+      severity: 'Low',
+      penalty: 0,
+      threatName: 'Unsupported Integrity Transform',
+      description: 'An integrity transform was observed, but its algorithm is not mapped by this analyzer.',
+      remediation: 'Confirm the integrity algorithm through an updated transform registry or authorized gateway telemetry.',
+    });
   }
 
   // 6. Key Lifetime
@@ -264,9 +312,16 @@ export function auditIpsecSecurity(sa: IkeSecurityAssociation): SecurityScorecar
   const hasCritical = findings.some((f) => f.severity === 'Critical');
   const hasHigh = findings.some((f) => f.severity === 'High');
 
-  const complianceNist = !hasCritical && !hasHigh && sa.ikeVersion === 'IKEv2';
-  const complianceRfc8221 = !hasCritical && !authUpper.includes('MD5') && !authUpper.includes('SHA1');
-  const complianceNsaCnsa = totalScore >= 90 && sa.encryptionKeyBits === 256 && sa.dhGroupNumber >= 19;
+  const cryptoEvidenceKnown =
+    !sa.encryptionAlgorithm.toUpperCase().includes('NOT OBSERVED') &&
+    !sa.encryptionAlgorithm.toUpperCase().includes('UNKNOWN') &&
+    sa.encryptionKeyBits > 0 &&
+    !authUpper.includes('NOT OBSERVED') &&
+    !authUpper.includes('UNKNOWN') &&
+    sa.dhGroupNumber > 0;
+  const complianceNist = cryptoEvidenceKnown && !hasCritical && !hasHigh && sa.ikeVersion === 'IKEv2';
+  const complianceRfc8221 = cryptoEvidenceKnown && !hasCritical && !authUpper.includes('MD5') && !authUpper.includes('SHA1');
+  const complianceNsaCnsa = cryptoEvidenceKnown && totalScore >= 90 && sa.encryptionKeyBits === 256 && sa.dhGroupNumber >= 19;
 
   return {
     totalScore,

@@ -1,6 +1,8 @@
-import React from 'react';
-import { Shield, FileText, Download, Sliders, Cpu, Plus } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Shield, Upload, Sliders, ChevronDown } from 'lucide-react';
 import { VpnCaptureScenario } from '../types';
+
+export type AppNavView = 'DASHBOARD' | 'ANALYSIS' | 'GATEWAYS' | 'REPORTS';
 
 interface HeaderProps {
   scenarios: VpnCaptureScenario[];
@@ -10,6 +12,9 @@ interface HeaderProps {
   onOpenTestbed: () => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onClearTraces?: () => void;
+  currentView?: AppNavView;
+  onViewChange?: (view: AppNavView) => void;
+  gatewayCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,123 +25,107 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTestbed,
   onFileUpload,
   onClearTraces,
+  currentView = 'DASHBOARD',
+  onViewChange,
+  gatewayCount = 0,
 }) => {
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const navItems: { id: AppNavView; label: string; badge?: number }[] = [
+    { id: 'DASHBOARD', label: 'Dashboard' },
+    { id: 'ANALYSIS', label: 'PCAP Analysis' },
+    { id: 'GATEWAYS', label: 'Gateways', badge: gatewayCount },
+    { id: 'REPORTS', label: 'Reports' },
+  ];
 
   return (
-    <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-30 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between h-14">
           
-          {/* Title & Branding */}
+          {/* Brand / Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-500/20 text-white shrink-0">
-              <Shield className="w-6 h-6" />
+            <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+              <Shield className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-bold tracking-tight text-white">
-                  AI-Powered IPsec Protocol Analyzer
-                </h1>
-                <span className="text-xs px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-medium">
-                  NTRO PS 26160
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">
-                Automated Cryptographic Security Assessment &amp; Encrypted ESP Traffic Classifier
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-900 text-sm tracking-tight">
+                VPN/PCAP Analyzer
+              </span>
+              <span className="hidden sm:inline-block text-[11px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                NTRO PS 26160
+              </span>
             </div>
           </div>
 
-          {/* Controls & Modals */}
-          <div className="flex items-center flex-wrap gap-2">
-            {/* Testbed Generator */}
-            <button
-              id="btn-open-testbed"
-              onClick={onOpenTestbed}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-750 hover:border-slate-600 transition-colors cursor-pointer"
-            >
-              <Sliders className="w-3.5 h-3.5 text-blue-400" />
-              <span>VPN Testbed Lab</span>
-            </button>
+          {/* Main Navigation Tabs */}
+          <nav className="flex items-center space-x-1 sm:space-x-2">
+            {navItems.map((item) => {
+              const isActive = currentView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  id={`nav-btn-${item.id.toLowerCase()}`}
+                  onClick={() => onViewChange?.(item.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-medium ${
+                        isActive
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-            {/* Security Report */}
-            <button
-              id="btn-open-report"
-              disabled={!selectedScenario}
-              onClick={onOpenReport}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition-colors cursor-pointer ${
-                selectedScenario
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Audit Reports</span>
-            </button>
-
-            {/* Upload PCAP */}
+          {/* Right Utility Actions */}
+          <div className="flex items-center gap-2">
+            {/* Quick PCAP Upload Button */}
             <input
               type="file"
               ref={fileInputRef}
               onChange={onFileUpload}
-              accept=".pcap,.pcapng,.cap,.json"
+              accept=".pcap,.pcapng,.cap"
               className="hidden"
             />
             <button
-              id="btn-upload-pcap"
+              id="btn-header-quick-upload"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors cursor-pointer"
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              title="Upload and analyze a network capture file"
             >
-              <Download className="w-3.5 h-3.5 rotate-180" />
-              <span>Upload Real .PCAP</span>
+              <Upload className="w-3.5 h-3.5 text-slate-500" />
+              <span>Upload PCAP</span>
             </button>
-          </div>
-        </div>
 
-        {/* Traces Bar */}
-        <div className="mt-3.5 pt-3 border-t border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs">
-          <div className="flex items-center gap-2 text-slate-400">
-            <Cpu className="w-3.5 h-3.5 text-blue-400" />
-            <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400">
-              Loaded Traces ({scenarios.length}):
-            </span>
-          </div>
+            {/* Testbed Generator */}
+            <button
+              id="btn-open-testbed"
+              onClick={onOpenTestbed}
+              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              title="Generate synthetic or controlled testbed traffic"
+            >
+              <Sliders className="w-3.5 h-3.5 text-slate-500" />
+              <span>Testbed</span>
+            </button>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-            {scenarios.length === 0 ? (
-              <span className="text-slate-400 italic text-[11px]">
-                No files loaded yet. Upload a real .pcap or create one in the Testbed Lab.
-              </span>
-            ) : (
-              <>
-                {scenarios.map((s) => {
-                  const isSelected = selectedScenario?.id === s.id;
-                  return (
-                    <button
-                      key={s.id}
-                      id={`scenario-tab-${s.id}`}
-                      onClick={() => onSelectScenario(s)}
-                      className={`px-3 py-1 rounded-md text-xs whitespace-nowrap transition-all cursor-pointer font-medium ${
-                        isSelected
-                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
-                          : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/60'
-                      }`}
-                    >
-                      {s.name}
-                    </button>
-                  );
-                })}
-                {onClearTraces && scenarios.length > 0 && (
-                  <button
-                    onClick={onClearTraces}
-                    className="text-xs text-rose-400 hover:text-rose-300 ml-2 px-2 py-0.5 rounded hover:bg-rose-950/40 transition-colors"
-                  >
-                    Clear All
-                  </button>
-                )}
-              </>
-            )}
+            {/* Status indicator */}
+            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 text-[11px] text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="hidden sm:inline">Engine Online</span>
+            </div>
           </div>
         </div>
       </div>

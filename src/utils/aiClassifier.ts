@@ -25,6 +25,23 @@ export function classifyEspTraffic(features: EspTrafficFeatures): AiPrediction {
     flowSymmetry,
   } = features;
 
+  if (features.packetCount < 5 || features.totalBytes === 0) {
+    return {
+      predictedClass: 'INSUFFICIENT_DATA',
+      confidenceScore: 0,
+      probabilities: [],
+      primaryFeatures: [{
+        name: 'Sample size',
+        value: `${features.packetCount} ESP packets`,
+        impact: 'Neutral',
+        explanation: 'Insufficient ESP observations for a reliable traffic-behavior classification.',
+      }],
+      source: 'UNKNOWN',
+      status: 'NOT_DETERMINABLE',
+      evidence: 'Fewer than five ESP packets or no ESP bytes were available.',
+    };
+  }
+
   // AI Statistical Pattern Matching / Distance-based Multi-class Inference
   // Archetypes:
   // 1. VoIP / Audio: small uniform packets (120-220b), low std (<40), strict 20ms IAT, high symmetry
@@ -135,8 +152,11 @@ export function classifyEspTraffic(features: EspTrafficFeatures): AiPrediction {
 
   return {
     predictedClass: top.category,
-    confidenceScore: Math.min(top.probability + 6, 99), // Calibrated confidence
+    confidenceScore: top.probability,
     probabilities,
     primaryFeatures,
+    source: 'ML_INFERENCE',
+    status: 'INFERRED',
+    evidence: 'Heuristic baseline inferred traffic behavior from aggregate ESP metadata; no cryptographic fields were inferred.',
   };
 }

@@ -209,45 +209,45 @@ connections {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+      <div className="bg-white border border-slate-200 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
         
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white">
+            <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
               <Sliders className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">
+              <h2 className="text-sm font-semibold text-slate-900">
                 VPN Testbed &amp; Configuration Generator
               </h2>
-              <p className="text-xs text-slate-400">
-                Fulfills Task (a) &amp; (b): Generate lab environments, config scripts, and capture traces
+              <p className="text-xs text-slate-500 mt-0.5">
+                Generate laboratory testbeds, swanctl configs, and test capture scenarios
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form Controls */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs text-slate-300">
+        <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs text-slate-700">
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* IKE Version */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">IKE Version</label>
+              <label className="block font-medium text-slate-700 mb-1.5">IKE Version</label>
               <select
                 value={ikeVersion}
                 onChange={(e) => setIkeVersion(e.target.value as any)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="IKEv2">IKEv2 (Modern Standard - RFC 7296)</option>
                 <option value="IKEv1">IKEv1 (Legacy Deprecated - RFC 2409)</option>
@@ -256,11 +256,11 @@ connections {
 
             {/* Mode */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">Operating Mode</label>
+              <label className="block font-medium text-slate-700 mb-1.5">Operating Mode</label>
               <select
                 value={mode}
                 onChange={(e) => setMode(e.target.value as any)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="Tunnel Mode">Tunnel Mode (Full IP encapsulation)</option>
                 <option value="Transport Mode">Transport Mode (Host-to-host, payload only)</option>
@@ -269,11 +269,11 @@ connections {
 
             {/* Cipher */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">Encryption Cipher</label>
+              <label className="block font-medium text-slate-700 mb-1.5">Encryption Cipher</label>
               <select
                 value={cipher}
                 onChange={(e) => setCipher(e.target.value as any)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="AES-256-GCM">AES-256-GCM (Authenticated AEAD - Recommended)</option>
                 <option value="AES-128-GCM">AES-128-GCM (Authenticated AEAD)</option>
@@ -284,11 +284,11 @@ connections {
 
             {/* DH Group */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">Diffie-Hellman Group</label>
+              <label className="block font-medium text-slate-700 mb-1.5">Diffie-Hellman Group</label>
               <select
                 value={dhGroup}
                 onChange={(e) => setDhGroup(Number(e.target.value))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value={19}>DH Group 19 (ECDH 256-bit NIST P-256 - CNSA)</option>
                 <option value={20}>DH Group 20 (ECDH 384-bit NIST P-384)</option>
@@ -300,11 +300,11 @@ connections {
 
             {/* PFS */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">Perfect Forward Secrecy (PFS)</label>
+              <label className="block font-medium text-slate-700 mb-1.5">Perfect Forward Secrecy (PFS)</label>
               <select
                 value={pfs ? 'yes' : 'no'}
                 onChange={(e) => setPfs(e.target.value === 'yes')}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="yes">Enabled (Child SA Rekeying with Ephemeral DH)</option>
                 <option value="no">Disabled (Vulnerable to Retroactive Decryption)</option>
@@ -313,11 +313,11 @@ connections {
 
             {/* Simulated Traffic Type */}
             <div>
-              <label className="block font-semibold text-slate-300 mb-1.5">Simulated Ingress Traffic</label>
+              <label className="block font-medium text-slate-700 mb-1.5">Simulated Ingress Traffic</label>
               <select
                 value={trafficType}
                 onChange={(e) => setTrafficType(e.target.value as any)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-medium focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-slate-300 rounded-md p-2 text-slate-900 text-xs font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="VoIP / Audio Call">VoIP / Audio Call (Small uniform 20ms packets)</option>
                 <option value="Video Streaming">Video Streaming (High bandwidth downstream frames)</option>
@@ -331,8 +331,8 @@ connections {
           {/* Generated Config Preview */}
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-white uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                <FileCode className="w-3.5 h-3.5 text-blue-400" />
+              <span className="font-semibold text-slate-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                <FileCode className="w-3.5 h-3.5 text-blue-600" />
                 Generated Configuration (strongSwan / Libreswan)
               </span>
               <button
@@ -341,14 +341,14 @@ connections {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
-                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 cursor-pointer"
               >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copied ? 'Copied' : 'Copy Config'}</span>
               </button>
             </div>
 
-            <pre className="p-3 bg-slate-950 rounded-lg font-mono text-[11px] text-slate-300 overflow-x-auto border border-slate-800">
+            <pre className="p-3.5 bg-slate-900 rounded-lg font-mono text-xs text-slate-200 overflow-x-auto border border-slate-800">
               {generateConfigText()}
             </pre>
           </div>
@@ -356,20 +356,20 @@ connections {
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
+        <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={handleDownloadPcap}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 transition-colors cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Download Synthetic .PCAP</span>
           </button>
 
           <button
             onClick={handleApplyToAnalyzer}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors cursor-pointer"
           >
-            <span>Load &amp; Analyze This Testbed In Dashboard →</span>
+            <span>Load &amp; Analyze This Testbed &rarr;</span>
           </button>
         </div>
 

@@ -13,6 +13,16 @@ export interface EvidenceRecord {
   fieldPath: string;
 }
 
+export interface EvidenceValue {
+  field: string;
+  value: unknown;
+  source: 'PCAP_OBSERVED' | 'GATEWAY_TELEMETRY' | 'ML_INFERENCE' | 'DERIVED_FROM_OBSERVED_DATA' | 'UNKNOWN';
+  confidence: number;
+  status: 'OBSERVED' | 'CONFIRMED' | 'INFERRED' | 'NOT_DETERMINABLE';
+  evidence: string;
+  packetNumbers?: number[];
+}
+
 export interface ParsedTransform {
   type: number;
   id: number;
@@ -37,7 +47,8 @@ export type TrafficCategory =
   | 'Web Browsing / HTTPS'
   | 'Bulk Data Transfer (DB/FTP)'
   | 'Telemetry / Heartbeat (ICMP)'
-  | 'Live Real Capture';
+  | 'Live Real Capture'
+  | 'INSUFFICIENT_DATA';
 
 export interface PacketInfo {
   id: number;
@@ -54,6 +65,37 @@ export interface PacketInfo {
   destPort?: number;
   ipVersion?: IpVersion;
   debug?: string;
+}
+
+export interface CaptureObservations {
+  totalPackets: number;
+  ikePackets: number;
+  espPackets: number;
+  ahPackets: number;
+  udpPackets: number;
+  tcpPackets: number;
+  icmpPackets: number;
+  ikeExchanges: string[];
+  ikePayloads: string[];
+  ikeMessageIds: number[];
+  ikeFlags: string[];
+  ikeNotifications: string[];
+  ikeVendorIds: string[];
+  natDetection: 'Detected' | 'Not detected' | 'Not determinable';
+  fragmentation: 'Supported' | 'Observed' | 'Not observed' | 'Not determinable';
+  trafficSelectors: string[];
+  natTraversal: 'Detected' | 'Not detected' | 'Not determined';
+  espSpis: string[];
+  ahSpis: string[];
+  ahSequenceRange: string;
+  espFlowDirections: string[];
+  captureDurationMs: number;
+  espSequenceRange: string;
+  espDuplicateSequences: number[];
+  espOutOfOrder: 'Observed' | 'Not observed' | 'Not determinable';
+  espExtendedSequenceNumbers: 'Observed' | 'Not observed' | 'Not determined';
+  linkTypes: string[];
+  captureNotes: string[];
 }
 
 export interface IkeSecurityAssociation {
@@ -74,6 +116,8 @@ export interface IkeSecurityAssociation {
   responderSpi: string;
   proposals?: ParsedProposal[];
   evidence?: EvidenceRecord[];
+  observations?: CaptureObservations;
+  fieldEvidence?: Record<string, EvidenceValue>;
 }
 
 export interface EspTrafficFeatures {
@@ -87,6 +131,7 @@ export interface EspTrafficFeatures {
   burstRatio: number;
   flowSymmetry: number; // 0-1 ratio between uplink and downlink
   calculatedEntropy: number; // 0-8 bits per byte
+  flowDurationMs?: number;
 }
 
 export interface AiPrediction {
@@ -102,6 +147,9 @@ export interface AiPrediction {
     impact: 'Supporting' | 'Neutral' | 'Contradicting';
     explanation: string;
   }[];
+  source?: 'ML_INFERENCE' | 'DERIVED_FROM_OBSERVED_DATA' | 'UNKNOWN';
+  status?: 'INFERRED' | 'NOT_DETERMINABLE';
+  evidence?: string;
 }
 
 export interface SecurityFinding {
@@ -127,6 +175,51 @@ export interface SecurityScorecard {
   metadataLeakageRisk: 'High' | 'Medium' | 'Low';
 }
 
+export interface GatewayTelemetryRecord {
+  gatewayId?: string;
+  gateway_id?: string;
+  adapter?: string;
+  source?: string;
+  status?: string;
+  collectedAt?: string;
+  collected_at?: string;
+  records?: Record<string, unknown>[];
+  evidence?: string[];
+  error?: string | null;
+  [key: string]: unknown;
+}
+
+export interface GatewayCorrelationResult {
+  correlation_status: 'CONFIRMED' | 'UNKNOWN';
+  matched: Array<{
+    correlation_status: string;
+    matched_spis: string[];
+    telemetry: Record<string, unknown>;
+  }>;
+  unmatchedTelemetry: Array<{
+    correlation_status: string;
+    telemetry: Record<string, unknown>;
+    evidence?: string;
+  }>;
+  unmatchedPcapSpis: string[];
+}
+
+export interface GatewayTelemetrySummary {
+  analysisId?: string;
+  gatewayId?: string;
+  gatewayStatus: string;
+  correlationStatus: string;
+  source?: string;
+  adapter?: string;
+  collectedAt?: string;
+  pcapSpis?: string[];
+  matchedSpis: string[];
+  unmatchedPcapSpis: string[];
+  evidence: string[];
+  telemetry: GatewayTelemetryRecord[];
+  correlation?: GatewayCorrelationResult;
+}
+
 export interface VpnCaptureScenario {
   id: string;
   name: string;
@@ -137,4 +230,51 @@ export interface VpnCaptureScenario {
   features: EspTrafficFeatures;
   packets: PacketInfo[];
   actualTrafficType: TrafficCategory;
+  gatewayTelemetry?: GatewayTelemetrySummary;
+  correlation?: GatewayCorrelationResult;
+}
+
+export type GatewayStatus =
+  | 'NEVER_CONNECTED'
+  | 'CONNECTED'
+  | 'STALE'
+  | 'OFFLINE'
+  | 'REVOKED';
+
+export interface GatewayHistoryItem {
+  id: number;
+  collectedAt?: string;
+  receivedAt?: string;
+  status: string;
+  error?: string | null;
+  recordsCount: number;
+}
+
+export interface GatewaySummary {
+  gateway_id: string;
+  display_name: string;
+  gateway_type: string;
+  status: GatewayStatus;
+  created_at: string;
+  last_seen_at?: string | null;
+  enrolled_at?: string | null;
+  revoked_at?: string | null;
+  agent_version?: string | null;
+  telemetry_adapter?: string | null;
+  active_ike_sa_count: number;
+  active_child_sa_count: number;
+  last_error?: string | null;
+  latest_telemetry?: GatewayTelemetryRecord | null;
+  history?: GatewayHistoryItem[];
+}
+
+export interface GatewayEnrollmentResult {
+  gateway_id: string;
+  display_name: string;
+  gateway_type: string;
+  status: string;
+  created_at: string;
+  enrollment_token: string;
+  expires_at: number;
+  server_url: string;
 }
