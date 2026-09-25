@@ -220,6 +220,32 @@ export interface GatewayTelemetrySummary {
   correlation?: GatewayCorrelationResult;
 }
 
+export interface MLPredictionResult {
+  prediction: string;
+  probabilities: Record<string, number>;
+  confidence: number | null;
+}
+
+export interface MLPredictions {
+  encryption: MLPredictionResult;
+  hash: MLPredictionResult;
+  dh_group: MLPredictionResult;
+  pfs_group: MLPredictionResult;
+}
+
+export interface MLSecurityFinding {
+  id: string;
+  title: string;
+  category: string;
+  severity: string;
+  basis: 'ml_inferred' | 'observed' | 'derived';
+  confidence: number;
+  confidence_label: string;
+  message: string;
+  detail: string;
+  recommendation: string;
+}
+
 export interface VpnCaptureScenario {
   id: string;
   name: string;
@@ -232,6 +258,9 @@ export interface VpnCaptureScenario {
   actualTrafficType: TrafficCategory;
   gatewayTelemetry?: GatewayTelemetrySummary;
   correlation?: GatewayCorrelationResult;
+  mlPredictions?: MLPredictions | null;
+  mlSecurityFindings?: MLSecurityFinding[];
+  mlWarning?: string | null;
 }
 
 export type GatewayStatus =

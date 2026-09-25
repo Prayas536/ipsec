@@ -171,6 +171,9 @@ export default function App() {
         actualTrafficType: 'Live Real Capture',
         gatewayTelemetry: mergedTelemetry,
         correlation: mergedTelemetry.correlation,
+        mlPredictions: parsed.mlPredictions ?? null,
+        mlSecurityFindings: parsed.mlSecurityFindings ?? [],
+        mlWarning: parsed.mlWarning ?? null,
       };
 
       setScenarios((prev) => [newScenario, ...prev]);
@@ -599,6 +602,7 @@ export default function App() {
                       sa={selectedScenario.sa}
                       gatewayTelemetry={selectedScenario.gatewayTelemetry}
                       correlation={selectedScenario.correlation}
+                      mlSecurityFindings={selectedScenario.mlSecurityFindings}
                     />
                   )}
 
@@ -606,6 +610,8 @@ export default function App() {
                     <AiTrafficAnalysis
                       features={selectedScenario.features}
                       prediction={aiPrediction}
+                      mlPredictions={selectedScenario.mlPredictions}
+                      mlWarning={selectedScenario.mlWarning}
                     />
                   )}
 

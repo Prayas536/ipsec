@@ -11,6 +11,11 @@ import {
 
 import { calculateEntropy } from './aiClassifier';
 
+import {
+  MLPredictions,
+  MLSecurityFinding,
+} from '../types';
+
 export interface ParsedPcapResult {
   scenarioName: string;
   packets: PacketInfo[];
@@ -18,6 +23,9 @@ export interface ParsedPcapResult {
   features: EspTrafficFeatures;
   fileSizeBytes: number;
   evidence: EvidenceRecord[];
+  mlPredictions?: MLPredictions | null;
+  mlSecurityFindings?: MLSecurityFinding[];
+  mlWarning?: string | null;
 }
 
 /* =========================================================

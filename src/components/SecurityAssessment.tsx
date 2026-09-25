@@ -1,13 +1,15 @@
 import React from 'react';
 import { ShieldCheck, AlertTriangle, CheckCircle2, XCircle, Wrench } from 'lucide-react';
-import { SecurityScorecard, IkeSecurityAssociation, GatewayCorrelationResult, GatewayTelemetrySummary } from '../types';
+import { SecurityScorecard, IkeSecurityAssociation, GatewayCorrelationResult, GatewayTelemetrySummary, MLSecurityFinding } from '../types';
 import { CombinedAnalysisPanel } from './CombinedAnalysisPanel';
+import { Cpu, Info } from 'lucide-react';
 
 interface SecurityAssessmentProps {
   scorecard: SecurityScorecard;
   sa: IkeSecurityAssociation;
   gatewayTelemetry?: GatewayTelemetrySummary;
   correlation?: GatewayCorrelationResult;
+  mlSecurityFindings?: MLSecurityFinding[];
 }
 
 export const SecurityAssessment: React.FC<SecurityAssessmentProps> = ({
@@ -15,16 +17,18 @@ export const SecurityAssessment: React.FC<SecurityAssessmentProps> = ({
   sa,
   gatewayTelemetry,
   correlation,
+  mlSecurityFindings,
 }) => {
   const getSeverityBadge = (severity: string) => {
-    switch (severity) {
-      case 'Critical':
+    const s = severity.toLowerCase();
+    switch (s) {
+      case 'critical':
         return 'bg-rose-50 text-rose-700 border-rose-200';
-      case 'High':
+      case 'high':
         return 'bg-orange-50 text-orange-700 border-orange-200';
-      case 'Medium':
+      case 'medium':
         return 'bg-amber-50 text-amber-700 border-amber-200';
-      case 'Low':
+      case 'low':
         return 'bg-slate-100 text-slate-700 border-slate-200';
       default:
         return 'bg-emerald-50 text-emerald-700 border-emerald-200';
@@ -43,6 +47,77 @@ export const SecurityAssessment: React.FC<SecurityAssessmentProps> = ({
           gatewayTelemetry={gatewayTelemetry}
           correlation={correlation}
         />
+      )}
+
+      {/* ML Security Assessment Findings Card */}
+      {mlSecurityFindings && mlSecurityFindings.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  ML-Inferred Security Posture Assessment
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+                  ML ANALYSIS ENGINE
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Automated security rules applied to ML predicted cryptographic parameters &amp; observed features
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 font-mono">
+              Findings Count: <strong className="text-slate-900">{mlSecurityFindings.length}</strong>
+            </div>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {mlSecurityFindings.map((finding) => (
+              <div key={finding.id} className="p-4 hover:bg-slate-50 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getSeverityBadge(finding.severity)}`}>
+                      {finding.severity}
+                    </span>
+                    <h4 className="text-xs font-bold text-slate-900">{finding.title}</h4>
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold ${
+                      finding.basis === 'ml_inferred'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : finding.basis === 'observed'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}>
+                      {finding.basis === 'ml_inferred' ? 'ML PREDICTED' : finding.basis.toUpperCase()}
+                    </span>
+                  </div>
+                  {finding.confidence !== undefined && (
+                    <span className="text-[11px] font-mono text-slate-500 font-semibold">
+                      Confidence: {(finding.confidence * 100).toFixed(1)}% ({finding.confidence_label})
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                  {finding.message}
+                </p>
+
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {finding.detail}
+                </p>
+
+                {finding.recommendation && (
+                  <div className="pt-1.5 flex items-start gap-1.5 text-xs text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">
+                    <Wrench className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-slate-900">Recommendation:</strong> {finding.recommendation}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* 1. Cryptographic Parameter Audit Table (Section 10) */}

@@ -11,6 +11,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from typing import Any
 
+import os
+import sys
+from pathlib import Path
+
+_SERVER_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SERVER_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 from scapy.all import AH, ESP, ICMP, IP, IPv6, TCP, UDP, rdpcap
 
 HOST = "127.0.0.1"
@@ -467,7 +476,45 @@ def analyze(data: bytes, filename: str) -> dict[str, Any]:
     }
     observations["captureNotes"] = [note for note in observations["captureNotes"] if note]
     sa = {"ikeVersion": ike_version or "Not observed in capture", "operationalMode": "Not determined from capture", "ipVersion": next(iter(ip_versions), "Not observed in capture"), "encryptionAlgorithm": encryption or "Not observed in capture", "encryptionKeyBits": key_bits, "authIntegrityAlgorithm": integrity or "Not observed in capture", "dhGroup": dh_group or "Not observed in capture", "dhGroupNumber": dh_number, "dhBits": dh_bits, "pfsEnabled": None, "keyLifetimeSeconds": None, "replayProtection": None, "replayWindowSize": None, "initiatorSpi": initiator_spi, "responderSpi": responder_spi, "proposals": proposals, "evidence": evidence or [{"value": None, "confidence": "unavailable", "source": "PCAP capture", "fieldPath": "IKE.SA"}], "observations": observations}
-    return {"scenarioName": filename.rsplit(".", 1)[0], "packets": parsed_packets, "sa": sa, "features": {"packetCount": len(esp_lengths), "totalBytes": total, "meanPacketLength": round(mean), "stdPacketLength": round(std), "minPacketLength": min(esp_lengths, default=0), "maxPacketLength": max(esp_lengths, default=0), "meanInterArrivalTimeMs": round(statistics.mean(iats), 1) if iats else 0, "burstRatio": 0.9 if iats and statistics.mean(iats) < 10 else 0.6 if iats and statistics.mean(iats) < 40 else 0.25 if iats else 0, "flowSymmetry": round(symmetry, 2), "calculatedEntropy": entropy(bytes(esp_bytes)), "flowDurationMs": round((float(packets[-1].time) - first_time) * 1000, 3)}, "fileSizeBytes": len(data), "evidence": evidence}
+
+    ml_predictions = None
+    ml_security_findings = []
+    ml_warning = None
+    try:
+        from backend.app.feature_extraction import extract_features_from_bytes, validate_ml_features
+        from backend.app.ml_inference import run_inference
+        from backend.app.ml_assessment import assess_ml_results
+
+        raw_ml_feats = extract_features_from_bytes(data, filename)
+        validated_ml_feats = validate_ml_features(raw_ml_feats)
+        ml_predictions = run_inference(validated_ml_feats)
+        ml_security_findings = assess_ml_results(ml_predictions, raw_ml_feats)
+    except Exception as exc:
+        ml_warning = f"ML inference unavailable: {exc}"
+
+    return {
+        "scenarioName": filename.rsplit(".", 1)[0],
+        "packets": parsed_packets,
+        "sa": sa,
+        "features": {
+            "packetCount": len(esp_lengths),
+            "totalBytes": total,
+            "meanPacketLength": round(mean),
+            "stdPacketLength": round(std),
+            "minPacketLength": min(esp_lengths, default=0),
+            "maxPacketLength": max(esp_lengths, default=0),
+            "meanInterArrivalTimeMs": round(statistics.mean(iats), 1) if iats else 0,
+            "burstRatio": 0.9 if iats and statistics.mean(iats) < 10 else 0.6 if iats and statistics.mean(iats) < 40 else 0.25 if iats else 0,
+            "flowSymmetry": round(symmetry, 2),
+            "calculatedEntropy": entropy(bytes(esp_bytes)),
+            "flowDurationMs": round((float(packets[-1].time) - first_time) * 1000, 3)
+        },
+        "fileSizeBytes": len(data),
+        "evidence": evidence,
+        "mlPredictions": ml_predictions,
+        "mlSecurityFindings": ml_security_findings,
+        "mlWarning": ml_warning,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):

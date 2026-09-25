@@ -1,30 +1,50 @@
-# Current Interfaces
+# API Documentation
 
-## Browser parser
+## 1. FastAPI Production Backend (`http://127.0.0.1:8000`)
 
-`parseUploadedFile(file: File)` returns `ParsedPcapResult` for classic PCAP and PCAPNG.
+### `POST /api/ml-analyze`
+Full end-to-end PCAP ML Inference & Security Assessment pipeline.
 
-## Local Scapy service
+- **Request**: `multipart/form-data` with file field (`.pcap`, `.pcapng`, or `.cap`). Max 100 MB.
+- **Response**: `200 OK` JSON containing:
+  ```json
+  {
+    "status": "success",
+    "analysis_timestamp": "2026-09-26T00:00:00Z",
+    "file": { "name": "sample.pcap", "size_bytes": 10240 },
+    "observed": { ... },
+    "ml_predictions": {
+      "encryption": { "prediction": "AES256", "probabilities": { "AES128": 0.03, "AES256": 0.97 }, "confidence": 0.97 },
+      "hash": { "prediction": "SHA384", "probabilities": { "SHA256": 0.01, "SHA384": 0.99 }, "confidence": 0.99 },
+      "dh_group": { "prediction": "DH15", "probabilities": { "DH14": 0.02, "DH15": 0.98 }, "confidence": 0.98 },
+      "pfs_group": { "prediction": "PFS15", "probabilities": { "NOPFS": 0.0, "PFS14": 0.01, "PFS15": 0.99 }, "confidence": 0.99 }
+    },
+    "security_findings": [ ... ],
+    "provenance": { ... },
+    "warnings": []
+  }
+  ```
 
-`POST http://127.0.0.1:8765/analyze`
+### `GET /api/ml-health`
+Returns health status and model loading metadata for the 4 joblib ML models.
 
-Request body: raw PCAP/PCAPNG bytes.
+---
 
-Headers:
+## 2. Local Scapy Analyzer (`http://127.0.0.1:8765`)
 
-- `Content-Type: application/octet-stream`
-- `X-Filename: original filename`
+### `POST /analyze`
+- **Headers**:
+  - `Content-Type: application/octet-stream`
+  - `X-Filename: capture.pcap`
+- **Body**: Raw PCAP / PCAPNG bytes
+- **Response**: JSON containing `scenarioName`, `packets`, `sa`, `features`, `fileSizeBytes`, `evidence`, `mlPredictions`, `mlSecurityFindings`, `mlWarning`.
 
-The response contains packets, SA data, features, observations, and evidence. The service is local-only by default.
+---
 
-## Agent
+## 3. Gateway & Persistence API (`http://127.0.0.1:8770`)
 
-The current agent is a command-line interface rather than a network API. It supports local PCAP analysis and optional HTTPS metadata submission. A production cloud API gateway still needs authentication, request validation, rate limiting, replay protection, persistence, and deployment configuration before it can be exposed publicly.
-
-## Local persistence endpoints
-
-`POST /api/analyze/pcap` now persists a sanitized analysis session in SQLite and returns an `analysisId`.
-
-`GET /api/analysis/{analysisId}` retrieves the stored SA summary, features, observations, packet metadata, and correlated telemetry. Raw packet previews, debug dumps, payloads, and source IP fields are not stored.
-
-Set `VPN_ANALYZER_DATABASE` to choose the SQLite path. The default is `data/analyzer.sqlite3`.
+- `POST /api/analyze/pcap`: Persists sanitized analysis session and returns `analysisId`.
+- `GET /api/analysis/{analysisId}`: Retrieves stored session.
+- `GET /api/analysis/{analysisId}/telemetry`: Correlates session with gateway telemetry.
+- `POST /api/gateways`: Enrolls a new VPN gateway agent.
+- `GET /api/gateways`: Lists enrolled gateways.
