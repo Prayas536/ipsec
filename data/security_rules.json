@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "policy_name": "NIST SP 800-77 Rev. 1 & NSA CNSA Suite IPsec Guidance",
+  "rules": [
+    {
+      "id": "ENC-DES-3DES",
+      "field": "encryption",
+      "target_values": ["DES", "3DES"],
+      "severity": "critical",
+      "title": "Deprecated Cipher (DES/3DES)",
+      "description": "DES and 3DES encryption algorithms are cryptographically broken and vulnerable to Sweet32 and key search attacks.",
+      "impact": "Confidentiality breach; complete traffic decryption by adversaries.",
+      "recommendation": "Immediately migrate to AES-256-GCM or AES-128-GCM."
+    },
+    {
+      "id": "ENC-AES128",
+      "field": "encryption",
+      "target_values": ["AES128", "AES-128"],
+      "severity": "low",
+      "title": "Acceptable 128-bit Encryption (AES-128)",
+      "description": "AES-128 provides adequate protection for standard enterprise communications but does not meet Top Secret CNSA 2.0 standards.",
+      "impact": "Lower security margin against future quantum/cryptanalytic advancements.",
+      "recommendation": "Upgrade to AES-256-GCM for high-assurance or government deployments."
+    },
+    {
+      "id": "HASH-MD5-SHA1",
+      "field": "hash",
+      "target_values": ["MD5", "SHA1"],
+      "severity": "critical",
+      "title": "Weak Integrity Hash Algorithm (MD5/SHA-1)",
+      "description": "MD5 and SHA-1 suffer from severe collision vulnerabilities.",
+      "impact": "Packet forgery and man-in-the-middle tampering.",
+      "recommendation": "Upgrade to SHA-256 or SHA-384."
+    },
+    {
+      "id": "DH-WEAK-MODP",
+      "field": "dh_group",
+      "target_values": ["DH1", "DH2", "DH5"],
+      "severity": "high",
+      "title": "Weak Diffie-Hellman Group (< 2048-bit)",
+      "description": "Diffie-Hellman Groups 1, 2, and 5 use modulus lengths below 2048 bits.",
+      "impact": "Key exchange eavesdropping via discrete logarithm computation.",
+      "recommendation": "Use DH Group 14 (2048-bit), Group 15 (3072-bit), or ECP Group 19 (256-bit)."
+    },
+    {
+      "id": "DH-LEGACY-14",
+      "field": "dh_group",
+      "target_values": ["DH14"],
+      "severity": "medium",
+      "title": "Legacy Diffie-Hellman Group 14 (2048-bit)",
+      "description": "DH Group 14 provides 112-bit security level, which is being phased out for high-security applications.",
+      "impact": "Reduced long-term security margin.",
+      "recommendation": "Upgrade to DH Group 15 (3072-bit MODP) or Group 19 (NIST P-256)."
+    },
+    {
+      "id": "PFS-DISABLED",
+      "field": "pfs_group",
+      "target_values": ["NOPFS", "NONE", "DISABLED"],
+      "severity": "high",
+      "title": "Perfect Forward Secrecy (PFS) Disabled",
+      "description": "Without PFS, compromise of long-term IKE private keys exposes all historical ESP sessions to retroactive decryption.",
+      "impact": "Historical session decryption if static keys are compromised.",
+      "recommendation": "Enable PFS on Child SA negotiations using DH Group 14 or higher."
+    }
+  ]
+}

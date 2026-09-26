@@ -259,3 +259,89 @@ class IKEEvent(BaseModel):
     name: str
     ike_sa_key: str
     status: EvidenceStatus = EvidenceStatus.OBSERVED
+
+
+# ---------------------------------------------------------------------------
+# Canonical AnalysisResult Schemas (Unified End-to-End Analysis Model)
+# ---------------------------------------------------------------------------
+
+class CanonicalCaptureInfo(BaseModel):
+    file_name: str
+    file_size_bytes: int = Field(ge=0)
+    packet_count: int = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    protocols_seen: list[str] = Field(default_factory=list)
+
+
+class CanonicalObservedData(BaseModel):
+    ipsec_detected: bool = False
+    ike_version: str | None = None
+    initiator_spi: str | None = None
+    responder_spi: str | None = None
+    esp_spis: list[str] = Field(default_factory=list)
+    exchange_types: list[str] = Field(default_factory=list)
+    observed_transforms: dict[str, Any] = Field(default_factory=dict)
+    ground_truth: dict[str, Any] | None = None
+
+
+class CanonicalMLPrediction(BaseModel):
+    prediction: str
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    probabilities: dict[str, float] = Field(default_factory=dict)
+    reasoning: str | None = None
+
+
+class CanonicalMLInferenceData(BaseModel):
+    encryption: CanonicalMLPrediction
+    hash: CanonicalMLPrediction
+    dh_group: CanonicalMLPrediction
+    pfs_group: CanonicalMLPrediction
+    traffic_classification: CanonicalMLPrediction | None = None
+
+
+class CanonicalSecurityFinding(BaseModel):
+    id: str
+    severity: str  # "critical" | "high" | "medium" | "low" | "info"
+    category: str
+    title: str
+    description: str
+    impact: str
+    recommendation: str
+    basis: str  # "observed" | "ml_inferred" | "derived"
+    confidence: float = Field(default=1.0, ge=0, le=1)
+
+
+class CanonicalSecurityAssessmentData(BaseModel):
+    risk_level: str  # "critical" | "high" | "medium" | "low" | "info"
+    risk_score: int = Field(ge=0, le=100)
+    findings: list[CanonicalSecurityFinding] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class CanonicalConfidenceData(BaseModel):
+    overall: float = Field(ge=0, le=1)
+    components: dict[str, float] = Field(default_factory=dict)
+
+
+class CanonicalProvenanceItem(BaseModel):
+    field: str
+    value: Any = None
+    source: str  # "OBSERVED" | "ML_INFERRED" | "SECURITY_RULE" | "GATEWAY_TELEMETRY" | "LAB_GROUND_TRUTH"
+    confidence: float = Field(ge=0, le=1)
+    evidence: str | list[str] = ""
+    status: str = "COMPLETED"
+
+
+class CanonicalAnalysisResult(BaseModel):
+    analysis_id: str
+    status: str
+    analysis_timestamp: str
+    capture: CanonicalCaptureInfo
+    observed: CanonicalObservedData
+    features: dict[str, Any] = Field(default_factory=dict)
+    ml_inference: CanonicalMLInferenceData
+    security_assessment: CanonicalSecurityAssessmentData
+    confidence: CanonicalConfidenceData
+    provenance: list[CanonicalProvenanceItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+

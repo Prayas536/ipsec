@@ -307,3 +307,89 @@ export interface GatewayEnrollmentResult {
   expires_at: number;
   server_url: string;
 }
+
+// ---------------------------------------------------------------------------
+// Canonical AnalysisResult Schemas (Unified End-to-End Analysis Model)
+// ---------------------------------------------------------------------------
+
+export interface CanonicalCaptureInfo {
+  file_name: string;
+  file_size_bytes: number;
+  packet_count: number;
+  duration_seconds: number;
+  protocols_seen: string[];
+}
+
+export interface CanonicalObservedData {
+  ipsec_detected: boolean;
+  ike_version?: string | null;
+  initiator_spi?: string | null;
+  responder_spi?: string | null;
+  esp_spis: string[];
+  exchange_types: string[];
+  observed_transforms: Record<string, unknown>;
+  ground_truth?: Record<string, unknown> | null;
+}
+
+export interface CanonicalMLPrediction {
+  prediction: string;
+  confidence: number | null;
+  probabilities: Record<string, number>;
+  reasoning?: string | null;
+}
+
+export interface CanonicalMLInferenceData {
+  encryption: CanonicalMLPrediction;
+  hash: CanonicalMLPrediction;
+  dh_group: CanonicalMLPrediction;
+  pfs_group: CanonicalMLPrediction;
+  traffic_classification?: CanonicalMLPrediction | null;
+}
+
+export interface CanonicalSecurityFinding {
+  id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category: string;
+  title: string;
+  description: string;
+  impact: string;
+  recommendation: string;
+  basis: 'observed' | 'ml_inferred' | 'derived';
+  confidence: number;
+}
+
+export interface CanonicalSecurityAssessmentData {
+  risk_level: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  risk_score: number;
+  findings: CanonicalSecurityFinding[];
+  recommendations: string[];
+}
+
+export interface CanonicalConfidenceData {
+  overall: number;
+  components: Record<string, number>;
+}
+
+export interface CanonicalProvenanceItem {
+  field: string;
+  value?: unknown;
+  source: 'OBSERVED' | 'ML_INFERRED' | 'SECURITY_RULE' | 'GATEWAY_TELEMETRY' | 'LAB_GROUND_TRUTH';
+  confidence: number;
+  evidence: string | string[];
+  status?: string;
+}
+
+export interface CanonicalAnalysisResult {
+  analysis_id: string;
+  status: string;
+  analysis_timestamp: string;
+  capture: CanonicalCaptureInfo;
+  observed: CanonicalObservedData;
+  features: Record<string, unknown>;
+  ml_inference: CanonicalMLInferenceData;
+  security_assessment: CanonicalSecurityAssessmentData;
+  confidence: CanonicalConfidenceData;
+  provenance: CanonicalProvenanceItem[];
+  warnings?: string[];
+}
+
